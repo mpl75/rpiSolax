@@ -55,19 +55,19 @@ while true; do
 
   clear
 
-  echo "--- PANELY ---------------------------------------"
+  echo "--- PANELY --------------------------------------"
   echo "        celkem: $(printf "%5d" "$totalPower") W   $(progress_bar $totalPower $totalPeak)"
   echo "      string 1: $(printf "%5d" "$pv1Power") W   $(progress_bar $pv1Power $peak1)"
   echo "      string 2: $(printf "%5d" "$pv2Power") W   $(progress_bar $pv2Power $peak2)"
   echo "dnes výroba DC: $(printf "%5.1f" "$totalProduction") kWh"
   echo ""
-  echo "--- BATERIE --------------------------------------"
+  echo "--- BATERIE -------------------------------------"
   echo "                          $(printf "%3d" "$batterySoC") %        $(printf "%5d" "$batteryTemp") °C"
   echo "        nabití: $(printf "%5.1f" "$batteryCap") kWh $(progress_bar $batterySoC 100)"
   if ((batteryPower >= 0)); then
-    echo -e "      nabíjení: \e[36m$(printf "%5d" "$batteryPower") W\e[0m"
+    printf "      nabíjení: \e[36m$(printf "%5d" "$batteryPower") W\e[0m\n"
   else
-    echo -e "      vybíjení: \e[31m$(printf "%5d" "$batteryPower") W\e[0m"
+    printf "      vybíjení: \e[31m$(printf "%5d" "$batteryPower") W\e[0m\n"
   fi
   echo "   dnes nabito: $(printf "%5.1f" "$totalChargedIn") kWh"
   echo "        vybito: $(printf "%5.1f" "$totalChargedOut") kWh"
@@ -79,15 +79,15 @@ while true; do
   echo ""
   echo "--- DISTRIBUČNÍ SÍŤ -----------------------------"
   if ((feedInPower < 0)); then
-    echo -e "         odběr: \e[31m$(printf "%5d" "$feedInPower") W\e[0m"
+    printf "         odběr: \e[31m$(printf "%5d" "$feedInPower") W\e[0m\n"
   else
-    echo -e "       dodávka: \e[36m$(printf "%5d" "$feedInPower") W\e[0m"
+    printf "       dodávka: \e[36m$(printf "%5d" "$feedInPower") W\e[0m\n"
   fi
   echo " dnes odebráno: $(printf "%5.2f" "$totalGridIn") kWh"
   echo "        dodáno: $(printf "%5.2f" "$totalGridOut") kWh"
   echo ""
   echo "--- DŮM  ----------------------------------------"
-  echo "aktuální odběr: $(printf "%5d" "$load") W"
+  echo "aktuální odběr: $(printf "%5d" "$load") W   $(progress_bar $load $maxLoad)"
   echo " dnes spotřeba: $(printf "%5.1f" "$totalConsumption") kWh"
   echo ""
 

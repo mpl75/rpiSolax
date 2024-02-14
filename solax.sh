@@ -1,6 +1,8 @@
 #!/bin/bash
 
-source solax.conf
+# (c) 2024 Michal Politzer
+
+source $(dirname "$0")/solax.conf
 
 unsignedToSigned() {
   local value=$1
@@ -13,22 +15,20 @@ unsignedToSigned() {
 progress_bar() {
   local val=$1
   local max=$2
-  local pbl=20
-  local cch=$((val * pbl / max))
-  local csp=$((pbl - cch))
+  local bar_length=20
 
-  if ((cch > 0)); then
-    local progress=$(printf '#%.0s' $(seq 1 $cch))
-  else
-    local progress=""
-  fi
-  if ((csp > 0)); then
-    local empty=$(printf '_%.0s' $(seq 1 $csp))
-  else
-    local empty=""
-  fi
+  local progress=$((val * bar_length / max))
+  local progress_bar=""
 
-  echo -n "[$progress$empty]"
+  for ((i=0; i<bar_length; i++)); do
+    if (( i < progress )); then
+      progress_bar+="#"
+    else
+      progress_bar+="_"
+    fi
+  done
+
+  echo -n "[$progress_bar]"
 }
 
 while true; do
@@ -67,7 +67,7 @@ while true; do
   if ((batteryPower >= 0)); then
     echo -e "      nabíjení: \e[36m$(printf "%5d" "$batteryPower") W\e[0m"
   else
-    echo -e "      vybíjení: \e[31m$(printf "%5d" "$batteryPower") W\e[0m"  
+    echo -e "      vybíjení: \e[31m$(printf "%5d" "$batteryPower") W\e[0m"
   fi
   echo "   dnes nabito: $(printf "%5.1f" "$totalChargedIn") kWh"
   echo "        vybito: $(printf "%5.1f" "$totalChargedOut") kWh"
@@ -83,7 +83,7 @@ while true; do
   if ((feedInPower < 0)); then
     echo -e "         odběr: \e[31m$(printf "%5d" "$feedInPower") W\e[0m"
   else
-    echo -e "       dodávka: \e[36m$(printf "%5d" "$feedInPower") W\e[0m"  
+    echo -e "       dodávka: \e[36m$(printf "%5d" "$feedInPower") W\e[0m"
   fi
   echo " dnes odebráno: $(printf "%5.2f" "$totalGridIn") kWh"
   echo "        dodáno: $(printf "%5.2f" "$totalGridOut") kWh"

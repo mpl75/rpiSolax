@@ -88,5 +88,13 @@ while true; do
   echo " dnes odebráno: $(printf "%5.2f" "$totalGridIn") kWh"
   echo "        dodáno: $(printf "%5.2f" "$totalGridOut") kWh"
 
-  sleep 4
+  symbols="/-\|"
+
+  for ((w=0; w<$delay; w++)); do
+    for ((i=0; i<${#symbols}; i++)); do
+      echo -n "${symbols:$i:1}"
+      sleep 0.25
+      echo -ne "\r"
+    done
+  done
 done

@@ -7,5 +7,5 @@ Bash script for Raspberry Pi command line for online monitor Solax inverter
 - install command line JSON parser 'jq' if missing (sudo apt install jq)
 
 ## Usage
-enter yourDirectory/solax.sh (f.e. ~/rpiSolax/solax.sh)
-press Ctrl + C to end script
+- enter yourDirectory/solax.sh (f.e. ~/rpiSolax/solax.sh)
+- press Ctrl + C to end script

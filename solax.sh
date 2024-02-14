@@ -73,10 +73,8 @@ while true; do
   echo "        vybito: $(printf "%5.1f" "$totalChargedOut") kWh"
   echo ""
   echo "--- STŘÍDAČ -------------------------------------"
-  echo "         výkon: $(printf "%5d" "$inverterPower") W"
+  echo "         výkon: $(printf "%5d" "$inverterPower") W   $(progress_bar $inverterPower $maxPower)"
   echo "dnes výroba AC: $(printf "%5.1f" "$totalProductionInclBatt") kWh"
-  echo "aktuální zátěž: $(printf "%5d" "$load") W"
-  echo " dnes spotřeba: $(printf "%5.1f" "$totalConsumption") kWh"
   echo "       teplota: $(printf "%5d" "$inverterTemp") °C"
   echo ""
   echo "--- DISTRIBUČNÍ SÍŤ -----------------------------"
@@ -87,6 +85,11 @@ while true; do
   fi
   echo " dnes odebráno: $(printf "%5.2f" "$totalGridIn") kWh"
   echo "        dodáno: $(printf "%5.2f" "$totalGridOut") kWh"
+  echo ""
+  echo "--- DŮM  ----------------------------------------"
+  echo "aktuální odběr: $(printf "%5d" "$load") W"
+  echo " dnes spotřeba: $(printf "%5.1f" "$totalConsumption") kWh"
+  echo ""
 
   symbols="/-\|"
 

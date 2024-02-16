@@ -52,7 +52,7 @@ while true; do
   read pv1Power pv2Power totalProduction totalProductionInclBatt feedInPower totalGridIn totalGridOut load batteryPower totalChargedIn totalChargedOut batterySoC batteryCap batteryTemp inverterTemp inverterPower inverterMode <<< "$data"
 
   totalConsumption=$(echo "$totalGridIn + $totalProductionInclBatt - $totalGridOut" | bc)
-  selfSufficiencyRate=$(echo "$totalProductionInclBatt * 100 / $totalConsumption" | bc)
+  selfSufficiencyRate=$(echo "($totalProductionInclBatt - $totalGridOut) * 100 / $totalConsumption" | bc)
   totalConsumption=${totalConsumption/./,}
   selfSufficiencyRate=${selfSufficiencyRate/./,}
 

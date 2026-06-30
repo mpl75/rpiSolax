@@ -19,10 +19,13 @@ const INVERTER_MODE = [
 // Meze pro ukazatele (bary) – ze solax.conf, předané PHP do window.LIMITS
 const L = window.LIMITS || { peak1: 5000, peak2: 5000, maxPower: 10000, maxLoad: 16000 };
 
-const W = (v) => (v == null ? '–' : Math.round(v).toLocaleString('cs-CZ') + ' W');
-const kWh = (v, d = 1) => (v == null ? '–' : v.toFixed(d).replace('.', ',') + ' kWh');
-const pct = (v) => (v == null ? '–' : Math.round(v) + ' %');
-const deg = (v) => (v == null ? '–' : Math.round(v) + ' °C');
+// Hodnoty vrací { n: číslo, u: jednotka } – číslo a jednotka mají vlastní
+// zarovnaný sloupec v mřížce (čísla vpravo, jednotky vlevo) jako v TUI.
+const W = (v) => (v == null ? { n: '–', u: '' } : { n: String(Math.round(v)), u: 'W' });
+const kWh = (v, d = 1) => (v == null ? { n: '–', u: '' } : { n: v.toFixed(d).replace('.', ','), u: 'kWh' });
+const pct = (v) => (v == null ? { n: '–', u: '' } : { n: String(Math.round(v)), u: '%' });
+const tempTxt = (v) => (v == null ? '–' : Math.round(v) + ' °C');
+const socTxt = (v) => (v == null ? '–' : Math.round(v) + ' %');
 const mode = (v) => (v == null || INVERTER_MODE[v] == null ? '–' : INVERTER_MODE[v]);
 
 // ---------- živé dlaždice ----------
@@ -36,56 +39,60 @@ async function refreshCurrent() {
   if (!s) { setStatus('zatím žádná data', 'stale'); return; }
   setStatus(s.age <= 30 ? 'živě' : `naposledy před ${s.age}s`, s.age <= 30 ? 'live' : 'stale');
 
-  const signed = (v, unit) => {
-    const cls = v >= 0 ? 'pos' : 'neg';
-    return `<span class="val ${cls}">${unit(v)}</span>`;
-  };
-
   document.getElementById('tiles').innerHTML = `
     <div class="group">
       <h3>Panely</h3>
-      <div class="row"><span class="label">Celkem</span><span class="val big">${W(s.totalPower)}</span></div>
-      <div class="bar"><i style="width:${bar(s.totalPower, L.peak1 + L.peak2)}%"></i></div>
-      <div class="row"><span class="label">String 1</span><span class="val">${W(s.pv1Power)}</span></div>
-      <div class="bar"><i style="width:${bar(s.pv1Power, L.peak1)}%"></i></div>
-      <div class="row"><span class="label">String 2</span><span class="val">${W(s.pv2Power)}</span></div>
-      <div class="bar"><i style="width:${bar(s.pv2Power, L.peak2)}%"></i></div>
-      <div class="row"><span class="label">Dnes DC</span><span class="val">${kWh(s.totalProduction)}</span></div>
+      <div class="metrics">
+        ${row('celkem', W(s.totalPower), { bar: bar(s.totalPower, L.peak1 + L.peak2), hl: true })}
+        ${row('string 1', W(s.pv1Power), { bar: bar(s.pv1Power, L.peak1) })}
+        ${row('string 2', W(s.pv2Power), { bar: bar(s.pv2Power, L.peak2) })}
+        ${row('dnes výroba DC', kWh(s.totalProduction))}
+      </div>
     </div>
     <div class="group">
-      <h3>Baterie</h3>
-      <div class="row"><span class="label">Nabití</span><span class="val big">${pct(s.batterySoC)}</span></div>
-      <div class="bar"><i style="width:${bar(s.batterySoC, 100)}%"></i></div>
-      <div class="row"><span class="label">${s.batteryPower >= 0 ? 'Nabíjení' : 'Vybíjení'}</span>${signed(s.batteryPower, W)}</div>
-      <div class="row"><span class="label">Kapacita</span><span class="val">${kWh(s.batteryCap)}</span></div>
-      <div class="row"><span class="label">Dnes nabito</span><span class="val">${kWh(s.totalChargedIn)}</span></div>
-      <div class="row"><span class="label">Dnes vybito</span><span class="val">${kWh(s.totalChargedOut)}</span></div>
-      <div class="row"><span class="label">Teplota</span><span class="val">${deg(s.batteryTemp)}</span></div>
+      <h3><span class="htitle">Baterie</span><span class="hmeta"><span class="hsoc">${socTxt(s.batterySoC)}</span><span class="htemp">${tempTxt(s.batteryTemp)}</span></span></h3>
+      <div class="metrics">
+        ${row('nabití', kWh(s.batteryCap), { bar: bar(s.batterySoC, 100) })}
+        ${row(s.batteryPower >= 0 ? 'nabíjení' : 'vybíjení', W(s.batteryPower), { cls: s.batteryPower >= 0 ? 'pos' : 'neg' })}
+        ${row('dnes nabito', kWh(s.totalChargedIn))}
+        ${row('vybito', kWh(s.totalChargedOut))}
+      </div>
     </div>
     <div class="group">
-      <h3>Střídač <span class="badge">${mode(s.inverterMode)}</span></h3>
-      <div class="row"><span class="label">Výkon</span><span class="val big">${W(s.inverterPower)}</span></div>
-      <div class="bar"><i style="width:${bar(s.inverterPower, L.maxPower)}%"></i></div>
-      <div class="row"><span class="label">Dnes AC</span><span class="val">${kWh(s.totalProductionInclBatt)}</span></div>
-      <div class="row"><span class="label">Teplota</span><span class="val">${deg(s.inverterTemp)}</span></div>
+      <h3><span class="htitle">Střídač</span><span class="badge">${mode(s.inverterMode)}</span><span class="hmeta"><span class="htemp">${tempTxt(s.inverterTemp)}</span></span></h3>
+      <div class="metrics">
+        ${row('výkon', W(s.inverterPower), { bar: bar(s.inverterPower, L.maxPower), hl: true })}
+        ${row('dnes výroba AC', kWh(s.totalProductionInclBatt))}
+      </div>
     </div>
     <div class="group">
       <h3>Distribuční síť</h3>
-      <div class="row"><span class="label">${s.feedInPower >= 0 ? 'Dodávka' : 'Odběr'}</span>${signed(s.feedInPower, W)}</div>
-      <div class="row"><span class="label">Dnes odebráno</span><span class="val">${kWh(s.totalGridIn, 2)}</span></div>
-      <div class="row"><span class="label">Dnes dodáno</span><span class="val">${kWh(s.totalGridOut, 2)}</span></div>
+      <div class="metrics">
+        ${row(s.feedInPower >= 0 ? 'dodávka' : 'odběr', W(s.feedInPower), { cls: s.feedInPower >= 0 ? 'pos' : 'neg' })}
+        ${row('dnes odebráno', kWh(s.totalGridIn, 2))}
+        ${row('dodáno', kWh(s.totalGridOut, 2))}
+      </div>
     </div>
     <div class="group">
       <h3>Dům</h3>
-      <div class="row"><span class="label">Aktuální odběr</span><span class="val big">${W(s.load)}</span></div>
-      <div class="bar"><i style="width:${bar(s.load, L.maxLoad)}%"></i></div>
-      <div class="row"><span class="label">Dnes spotřeba</span><span class="val">${kWh(s.totalConsumption, 2)}</span></div>
-      <div class="row"><span class="label">Soběstačnost</span><span class="val">${pct(s.selfSufficiencyRate)}</span></div>
-      <div class="bar"><i style="width:${bar(s.selfSufficiencyRate, 100)}%"></i></div>
+      <div class="metrics">
+        ${row('aktuální odběr', W(s.load), { bar: bar(s.load, L.maxLoad), hl: true })}
+        ${row('dnes spotřeba', kWh(s.totalConsumption, 2))}
+        ${row('soběstačnost', pct(s.selfSufficiencyRate), { bar: bar(s.selfSufficiencyRate, 100) })}
+      </div>
     </div>`;
 }
 
 const bar = (v, max) => Math.max(0, Math.min(100, ((v || 0) / max) * 100)).toFixed(0);
+
+// Čtyři buňky mřížky .metrics: popisek | číslo (vpravo) | jednotka (vlevo) | bar.
+// Sdílené sloupce v rámci panelu => čísla, jednotky i bary jsou přesně pod sebou.
+// val = { n, u }. o.hl = zvýraznit, o.cls = 'pos'/'neg', o.bar = % naplnění baru.
+function row(label, val, o = {}) {
+  const cls = o.cls ? ' ' + o.cls : (o.hl ? ' hl' : '');
+  const b = o.bar == null ? '<span></span>' : `<span class="ibar"><i style="width:${o.bar}%"></i></span>`;
+  return `<span class="label">${label}</span><span class="num${cls}">${val.n}</span><span class="unit">${val.u}</span>${b}`;
+}
 
 function setStatus(text, cls) {
   const el = document.getElementById('status');

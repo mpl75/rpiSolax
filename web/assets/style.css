@@ -1,0 +1,108 @@
+:root {
+  color-scheme: dark;
+  --bg: #0e1116;
+  --card: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #f5b301;
+  --green: #3fb950;
+  --blue: #58a6ff;
+  --red: #ff6b6b;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: .8rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 10;
+}
+header h1 { font-size: 1.1rem; margin: 0; }
+.head-right { display: flex; align-items: center; gap: 1rem; font-size: .85rem; }
+.status { color: var(--muted); }
+.status.live { color: var(--green); }
+.status.stale { color: var(--red); }
+.user { color: var(--muted); }
+.logout { color: var(--accent); text-decoration: none; }
+
+main { padding: 1.2rem; max-width: 1100px; margin: 0 auto; }
+
+/* --- živé dlaždice --- */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.group {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+}
+.group h3 {
+  margin: 0 0 .7rem;
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+}
+.group h3 .badge {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: .7rem;
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: .05rem .4rem;
+  margin-left: .3rem;
+}
+.row { display: flex; justify-content: space-between; align-items: baseline; margin: .35rem 0; }
+.row .label { color: var(--muted); font-size: .85rem; }
+.row .val { font-variant-numeric: tabular-nums; font-weight: 600; }
+.val.pos { color: var(--blue); }
+.val.neg { color: var(--red); }
+.big { font-size: 1.6rem; }
+
+/* jednoduchý ukazatel naplnění (SoC / výkon) */
+.bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; margin-top: .3rem; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+
+/* --- grafy --- */
+.range { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.range button {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: .45rem .9rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: .85rem;
+}
+.range button.active { background: var(--accent); color: #1a1a1a; border-color: var(--accent); font-weight: 600; }
+
+.chart-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1.2rem;
+}
+.chart-card h2 { margin: 0 0 .8rem; font-size: .95rem; color: var(--muted); }
+
+/* uPlot v tmavém motivu */
+.u-axis { color: var(--muted); }
+.uplot { width: 100%; }

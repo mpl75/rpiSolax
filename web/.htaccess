@@ -1,0 +1,4 @@
+# Přímý přístup k datům, konfiguraci a skriptům zakázán – vše jde přes index.php.
+<FilesMatch "\.(json|csv|log|conf|gz|sh)$">
+    Require all denied
+</FilesMatch>

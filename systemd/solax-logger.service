@@ -1,0 +1,17 @@
+[Unit]
+Description=Solax FVE logger (vzorkování 5 s -> CSV)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/html/rpiSolax
+ExecStart=/var/www/html/rpiSolax/solax.sh
+Restart=always
+RestartSec=10
+# TUI se nevykresluje (stdout není terminál), loguje se jen když je v
+# solax.conf nastaveno log=1.
+
+[Install]
+WantedBy=multi-user.target

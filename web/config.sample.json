@@ -1,0 +1,10 @@
+{
+  "logDir": "/var/www/html/rpiSolax/logs",
+  "users": [
+    {
+      "user": "michal",
+      "password": "$2y$10$REPLACE_WITH_BCRYPT_HASH",
+      "admin": true
+    }
+  ]
+}

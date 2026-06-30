@@ -1,0 +1,298 @@
+<?php
+// rpiSolax – vizualizace FVE. Jediný vstupní bod (po vzoru rpiGallery).
+// Řeší: přihlášení (session + CSRF + rate-limit + "zapamatuj si mě" cookie),
+// JSON API nad CSV logy a vykreslení dashboardu.
+
+declare(strict_types=1);
+session_start();
+
+// ---------- Konfigurace ----------
+$config = json_decode(@file_get_contents(__DIR__ . '/config.json'), true);
+if (!is_array($config)) {
+    $config = ['users' => []];
+}
+// Kde leží CSV logy (zapisuje je solax.sh). Lze přepsat v config.json.
+$LOG_DIR = $config['logDir'] ?? '/var/www/html/rpiSolax/logs';
+
+$_SESSION['csrf'] ??= bin2hex(random_bytes(32));
+$secure = !empty($_SERVER['HTTPS']); // lokálně po HTTP funguje taky
+
+// Pořadí sloupců v CSV (musí sedět se solax.sh a solax-aggregate.sh).
+// Definováno nahoře, protože top-level `const` se v PHP nehoistuje.
+const FIELDS = [
+    'timestamp', 'pv1Power', 'pv2Power', 'totalPower', 'totalProduction',
+    'totalProductionInclBatt', 'feedInPower', 'totalGridIn', 'totalGridOut',
+    'load', 'batteryPower', 'totalChargedIn', 'totalChargedOut', 'batterySoC',
+    'batteryCap', 'batteryTemp', 'inverterTemp', 'inverterPower', 'totalConsumption',
+    'selfSufficiencyRate', 'inverterMode', 'batteryMode',
+];
+
+// ---------- Auth tokeny (HMAC, stejný princip jako galerie) ----------
+function makeAuthToken(string $user, bool $admin, array $config): string {
+    $secret  = $config['users'][0]['password'] ?? 'x';
+    $payload = $user . '|' . ($admin ? '1' : '0');
+    $sig     = hash_hmac('sha256', $payload, $secret);
+    return base64_encode($payload . '|' . $sig);
+}
+function verifyAuthToken(string $token, array $config): ?array {
+    $decoded = base64_decode($token, true);
+    if (!$decoded) return null;
+    $parts = explode('|', $decoded);
+    if (count($parts) !== 3) return null;
+    [$user, $admin, $sig] = $parts;
+    $secret   = $config['users'][0]['password'] ?? 'x';
+    $expected = hash_hmac('sha256', $user . '|' . $admin, $secret);
+    if (!hash_equals($expected, $sig)) return null;
+    return ['user' => $user, 'admin' => $admin === '1'];
+}
+
+// ---------- Odhlášení ----------
+if (isset($_GET['logout'])) {
+    session_destroy();
+    setcookie('solax_auth', '', ['expires' => time() - 3600, 'path' => '/', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
+    header('Location: /solax');
+    exit;
+}
+
+// ---------- Přihlášení ----------
+$loginError = false;
+if (isset($_POST['login_user'], $_POST['login_pass'])) {
+    if (($_POST['csrf'] ?? '') !== $_SESSION['csrf']) {
+        $loginError = true;
+    } else {
+        $ipHash   = hash('sha256', $_SERVER['REMOTE_ADDR'] ?? '');
+        $failFile = sys_get_temp_dir() . '/solax_login_fails_' . $ipHash . '.json';
+        $fails    = is_file($failFile) ? (json_decode(file_get_contents($failFile), true) ?: []) : [];
+        $fails    = array_filter($fails, fn($t) => $t > time() - 900);
+        if (count($fails) >= 5) {
+            http_response_code(429);
+            echo 'Příliš mnoho pokusů. Zkuste to za 15 minut.';
+            exit;
+        }
+        $user = null;
+        foreach ($config['users'] as $u) {
+            if ($_POST['login_user'] === $u['user'] && password_verify($_POST['login_pass'], $u['password'])) {
+                $user = $u;
+                break;
+            }
+        }
+        if ($user) {
+            session_regenerate_id(true);
+            $_SESSION['csrf']          = bin2hex(random_bytes(32));
+            $_SESSION['authenticated'] = true;
+            $_SESSION['user']          = $user['user'];
+            $token = makeAuthToken($user['user'], !empty($user['admin']), $config);
+            setcookie('solax_auth', $token, ['expires' => time() + 365 * 86400, 'path' => '/', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
+            header('Location: /solax');
+            exit;
+        }
+        $fails[] = time();
+        file_put_contents($failFile, json_encode($fails));
+        $loginError = true;
+    }
+}
+
+// ---------- Obnova přihlášení z cookie ----------
+if (empty($_SESSION['authenticated']) && isset($_COOKIE['solax_auth'])) {
+    $authData = verifyAuthToken($_COOKIE['solax_auth'], $config);
+    if ($authData) {
+        $_SESSION['authenticated'] = true;
+        $_SESSION['user']          = $authData['user'];
+    }
+}
+
+// ---------- Brána: bez přihlášení dál nepustíme ----------
+if (empty($_SESSION['authenticated'])) {
+    showLoginForm($loginError);
+    exit;
+}
+
+// =====================================================================
+//  Od tohoto místa je uživatel přihlášený
+// =====================================================================
+
+// ---------- Router statických assetů (přes PHP, ať nemusíme měnit vhost) ----------
+if (isset($_GET['asset'])) {
+    serveAsset($_GET['asset']);
+    exit;
+}
+
+// ---------- JSON API ----------
+if (isset($_GET['api'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode(handleApi($_GET, $LOG_DIR), JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// ---------- Jinak: dashboard ----------
+renderDashboard();
+exit;
+
+
+// =====================================================================
+//  Funkce
+// =====================================================================
+
+/** Načte řádky jednoho dne. Preferuje agregát (10min), pak syrový (5s), pak .gz. */
+function dayRows(string $logDir, string $date): array {
+    foreach (["$logDir/agg/$date.csv", "$logDir/raw/$date.csv"] as $f) {
+        if (is_file($f)) return readCsv($f);
+    }
+    $gz = "$logDir/raw/$date.csv.gz";
+    if (is_file($gz)) return readCsv($gz, true);
+    return [];
+}
+
+function readCsv(string $file, bool $gz = false): array {
+    $rows = [];
+    $fh   = $gz ? gzopen($file, 'rb') : fopen($file, 'rb');
+    if (!$fh) return $rows;
+    $first = true;
+    while (($line = $gz ? gzgets($fh) : fgets($fh)) !== false) {
+        if ($first) { $first = false; continue; } // přeskoč hlavičku
+        $line = trim($line);
+        if ($line === '') continue;
+        $rows[] = explode(',', $line);
+    }
+    $gz ? gzclose($fh) : fclose($fh);
+    return $rows;
+}
+
+function handleApi(array $q, string $logDir): array {
+    $api = $q['api'];
+
+    if ($api === 'current') {
+        // poslední vzorek z dnešního (popř. včerejšího) syrového logu
+        foreach ([date('Y-m-d'), date('Y-m-d', time() - 86400)] as $d) {
+            $rows = dayRows($logDir, $d);
+            if ($rows) {
+                $last = end($rows);
+                $obj  = [];
+                foreach (FIELDS as $i => $name) {
+                    $obj[$name] = isset($last[$i]) ? $last[$i] + 0 : null;
+                }
+                $obj['age'] = time() - (int)$obj['timestamp'];
+                return ['ok' => true, 'sample' => $obj];
+            }
+        }
+        return ['ok' => true, 'sample' => null];
+    }
+
+    if ($api === 'series') {
+        $range = $q['range'] ?? 'day';
+        $now   = time();
+        switch ($range) {
+            case 'live':  $from = $now - 1800;       break; // 30 min
+            case 'day':   $from = strtotime('today'); break;
+            case 'week':  $from = $now - 7 * 86400;  break;
+            case 'month': $from = $now - 30 * 86400; break;
+            default:      $from = strtotime('today');
+        }
+        $to = $now;
+
+        // posbírej dny v rozsahu
+        $cols = array_fill(0, count(FIELDS), []);
+        $startDay = strtotime(date('Y-m-d', $from));
+        for ($d = $startDay; $d <= $to; $d += 86400) {
+            $rows = dayRows($logDir, date('Y-m-d', $d));
+            foreach ($rows as $r) {
+                $ts = (int)($r[0] ?? 0);
+                if ($ts < $from || $ts > $to) continue;
+                foreach (array_keys(FIELDS) as $i) {
+                    $cols[$i][] = isset($r[$i]) ? $r[$i] + 0 : null;
+                }
+            }
+        }
+        return ['ok' => true, 'fields' => FIELDS, 'data' => $cols, 'count' => count($cols[0])];
+    }
+
+    return ['ok' => false, 'error' => 'unknown api'];
+}
+
+function serveAsset(string $name): void {
+    $map = [
+        'app.js'    => 'application/javascript; charset=utf-8',
+        'style.css' => 'text/css; charset=utf-8',
+        'uplot.js'  => 'application/javascript; charset=utf-8',
+        'uplot.css' => 'text/css; charset=utf-8',
+    ];
+    if (!isset($map[$name])) { http_response_code(404); exit; }
+    $path = __DIR__ . '/assets/' . $name;
+    if (!is_file($path)) { http_response_code(404); exit; }
+    header('Content-Type: ' . $map[$name]);
+    header('Cache-Control: public, max-age=3600');
+    readfile($path);
+}
+
+function showLoginForm(bool $error): void {
+    header('Content-Type: text/html; charset=utf-8');
+    $csrf = htmlspecialchars($_SESSION['csrf']);
+    $err  = $error ? '<div class="err">Nesprávné přihlašovací údaje</div>' : '';
+    echo <<<HTML
+<!DOCTYPE html><html lang="cs"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solax – přihlášení</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center;
+         font-family:system-ui,sans-serif; background:#0e1116; color:#e6edf3; }
+  form { background:#161b22; padding:2rem; border-radius:14px; width:280px;
+         box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  h1 { font-size:1.1rem; margin:0 0 1rem; text-align:center; }
+  input { width:100%; box-sizing:border-box; margin:.4rem 0; padding:.7rem;
+          border:1px solid #30363d; border-radius:8px; background:#0e1116; color:#e6edf3; }
+  button { width:100%; margin-top:.6rem; padding:.7rem; border:0; border-radius:8px;
+           background:#f5b301; color:#1a1a1a; font-weight:600; cursor:pointer; }
+  .err { color:#ff6b6b; font-size:.85rem; text-align:center; margin-bottom:.5rem; }
+</style></head><body>
+<form method="post">
+  <h1>☀️ Solax FVE</h1>
+  $err
+  <input type="hidden" name="csrf" value="$csrf">
+  <input type="text" name="login_user" placeholder="Uživatel" autocomplete="username" required autofocus>
+  <input type="password" name="login_pass" placeholder="Heslo" autocomplete="current-password" required>
+  <button type="submit">Přihlásit</button>
+</form>
+</body></html>
+HTML;
+}
+
+function renderDashboard(): void {
+    $user = htmlspecialchars($_SESSION['user'] ?? '');
+    echo <<<HTML
+<!DOCTYPE html><html lang="cs"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solax FVE</title>
+<link rel="stylesheet" href="?asset=uplot.css">
+<link rel="stylesheet" href="?asset=style.css">
+</head><body>
+<header>
+  <h1>☀️ Solax FVE</h1>
+  <div class="head-right">
+    <span id="status" class="status">–</span>
+    <span class="user">$user</span>
+    <a href="?logout" class="logout">Odhlásit</a>
+  </div>
+</header>
+
+<main>
+  <section class="tiles" id="tiles"><!-- živé hodnoty doplní JS --></section>
+
+  <section class="charts">
+    <div class="range">
+      <button data-range="live" class="active">Živě</button>
+      <button data-range="day">Den</button>
+      <button data-range="week">Týden</button>
+      <button data-range="month">Měsíc</button>
+    </div>
+    <div class="chart-card"><h2>Výkon (W)</h2><div id="chartPower"></div></div>
+    <div class="chart-card"><h2>Stav baterie (%)</h2><div id="chartSoc"></div></div>
+  </section>
+</main>
+
+<script src="?asset=uplot.js"></script>
+<script src="?asset=app.js"></script>
+</body></html>
+HTML;
+}

@@ -1,0 +1,8 @@
+[Unit]
+Description=Solax FVE - agregace logů (5s -> 10min)
+
+[Service]
+Type=oneshot
+User=www-data
+WorkingDirectory=/var/www/html/rpiSolax
+ExecStart=/var/www/html/rpiSolax/solax-aggregate.sh

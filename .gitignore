@@ -1,1 +1,15 @@
 .nova
+
+# Reálná konfigurace s hesly / sériovým číslem – do repa NEpatří
+web/config.json
+
+# Logy
+logs/
+*.csv
+*.csv.gz
+
+# Lokální přepsání solax.conf na Pi (pokud bys ho verzoval zvlášť)
+solax.local.conf
+
+# macOS
+.DS_Store

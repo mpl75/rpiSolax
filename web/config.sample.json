@@ -1,5 +1,6 @@
 {
   "logDir": "/var/www/html/rpiSolax/logs",
+  "authSecret": "REPLACE_WITH_RANDOM_HEX  (php -r 'echo bin2hex(random_bytes(32));')",
   "users": [
     {
       "user": "michal",

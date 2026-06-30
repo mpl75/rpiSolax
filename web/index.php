@@ -27,23 +27,38 @@ const FIELDS = [
     'selfSufficiencyRate', 'inverterMode', 'batteryMode',
 ];
 
-// ---------- Auth tokeny (HMAC, stejný princip jako galerie) ----------
-function makeAuthToken(string $user, bool $admin, array $config): string {
-    $secret  = $config['users'][0]['password'] ?? 'x';
-    $payload = $user . '|' . ($admin ? '1' : '0');
-    $sig     = hash_hmac('sha256', $payload, $secret);
+// ---------- Auth tokeny (HMAC, podepsaná "zapamatuj si mě" cookie) ----------
+const TOKEN_TTL = 90 * 86400; // platnost tokenu (90 dní)
+
+// Vyhrazený náhodný klíč z config.json; fallback na hash prvního uživatele
+// (kompatibilita, aby chybějící authSecret nikoho nevyhodil).
+function authSecret(array $config): string {
+    $s = $config['authSecret'] ?? '';
+    return $s !== '' ? $s : ($config['users'][0]['password'] ?? 'x');
+}
+function makeAuthToken(string $user, array $config): string {
+    $exp     = time() + TOKEN_TTL;
+    $payload = $user . '|' . $exp;
+    $sig     = hash_hmac('sha256', $payload, authSecret($config));
     return base64_encode($payload . '|' . $sig);
 }
+// Vrátí ['user','admin'] jen pro platný, neexpirovaný token EXISTUJÍCÍHO uživatele.
+// Práva (admin) se čtou z aktuálního configu, ne z tokenu.
 function verifyAuthToken(string $token, array $config): ?array {
     $decoded = base64_decode($token, true);
     if (!$decoded) return null;
     $parts = explode('|', $decoded);
     if (count($parts) !== 3) return null;
-    [$user, $admin, $sig] = $parts;
-    $secret   = $config['users'][0]['password'] ?? 'x';
-    $expected = hash_hmac('sha256', $user . '|' . $admin, $secret);
-    if (!hash_equals($expected, $sig)) return null;
-    return ['user' => $user, 'admin' => $admin === '1'];
+    [$user, $exp, $sig] = $parts;
+    $expected = hash_hmac('sha256', $user . '|' . $exp, authSecret($config));
+    if (!hash_equals($expected, $sig)) return null;   // špatný podpis
+    if ((int)$exp < time()) return null;              // expirovaný token
+    foreach ($config['users'] as $u) {                // uživatel musí stále existovat
+        if (($u['user'] ?? null) === $user) {
+            return ['user' => $user, 'admin' => !empty($u['admin'])];
+        }
+    }
+    return null;
 }
 
 // ---------- Odhlášení ----------
@@ -81,8 +96,9 @@ if (isset($_POST['login_user'], $_POST['login_pass'])) {
             $_SESSION['csrf']          = bin2hex(random_bytes(32));
             $_SESSION['authenticated'] = true;
             $_SESSION['user']          = $user['user'];
-            $token = makeAuthToken($user['user'], !empty($user['admin']), $config);
-            setcookie('solax_auth', $token, ['expires' => time() + 365 * 86400, 'path' => '/', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
+            $_SESSION['admin'] = !empty($user['admin']);
+            $token = makeAuthToken($user['user'], $config);
+            setcookie('solax_auth', $token, ['expires' => time() + TOKEN_TTL, 'path' => '/', 'secure' => $secure, 'httponly' => true, 'samesite' => 'Lax']);
             header('Location: /solax');
             exit;
         }
@@ -98,6 +114,7 @@ if (empty($_SESSION['authenticated']) && isset($_COOKIE['solax_auth'])) {
     if ($authData) {
         $_SESSION['authenticated'] = true;
         $_SESSION['user']          = $authData['user'];
+        $_SESSION['admin']         = $authData['admin'];
     }
 }
 

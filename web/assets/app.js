@@ -16,6 +16,9 @@ const INVERTER_MODE = [
   'EPS Check', 'EPS Mode', 'Self Test', 'Idle', 'Standby',
 ];
 
+// Meze pro ukazatele (bary) – ze solax.conf, předané PHP do window.LIMITS
+const L = window.LIMITS || { peak1: 5000, peak2: 5000, maxPower: 10000, maxLoad: 16000 };
+
 const W = (v) => (v == null ? '–' : Math.round(v).toLocaleString('cs-CZ') + ' W');
 const kWh = (v, d = 1) => (v == null ? '–' : v.toFixed(d).replace('.', ',') + ' kWh');
 const pct = (v) => (v == null ? '–' : Math.round(v) + ' %');
@@ -42,9 +45,11 @@ async function refreshCurrent() {
     <div class="group">
       <h3>Panely</h3>
       <div class="row"><span class="label">Celkem</span><span class="val big">${W(s.totalPower)}</span></div>
-      <div class="bar"><i style="width:${bar(s.totalPower, 10000)}%"></i></div>
+      <div class="bar"><i style="width:${bar(s.totalPower, L.peak1 + L.peak2)}%"></i></div>
       <div class="row"><span class="label">String 1</span><span class="val">${W(s.pv1Power)}</span></div>
+      <div class="bar"><i style="width:${bar(s.pv1Power, L.peak1)}%"></i></div>
       <div class="row"><span class="label">String 2</span><span class="val">${W(s.pv2Power)}</span></div>
+      <div class="bar"><i style="width:${bar(s.pv2Power, L.peak2)}%"></i></div>
       <div class="row"><span class="label">Dnes DC</span><span class="val">${kWh(s.totalProduction)}</span></div>
     </div>
     <div class="group">
@@ -53,11 +58,14 @@ async function refreshCurrent() {
       <div class="bar"><i style="width:${bar(s.batterySoC, 100)}%"></i></div>
       <div class="row"><span class="label">${s.batteryPower >= 0 ? 'Nabíjení' : 'Vybíjení'}</span>${signed(s.batteryPower, W)}</div>
       <div class="row"><span class="label">Kapacita</span><span class="val">${kWh(s.batteryCap)}</span></div>
+      <div class="row"><span class="label">Dnes nabito</span><span class="val">${kWh(s.totalChargedIn)}</span></div>
+      <div class="row"><span class="label">Dnes vybito</span><span class="val">${kWh(s.totalChargedOut)}</span></div>
       <div class="row"><span class="label">Teplota</span><span class="val">${deg(s.batteryTemp)}</span></div>
     </div>
     <div class="group">
       <h3>Střídač <span class="badge">${mode(s.inverterMode)}</span></h3>
       <div class="row"><span class="label">Výkon</span><span class="val big">${W(s.inverterPower)}</span></div>
+      <div class="bar"><i style="width:${bar(s.inverterPower, L.maxPower)}%"></i></div>
       <div class="row"><span class="label">Dnes AC</span><span class="val">${kWh(s.totalProductionInclBatt)}</span></div>
       <div class="row"><span class="label">Teplota</span><span class="val">${deg(s.inverterTemp)}</span></div>
     </div>
@@ -70,6 +78,7 @@ async function refreshCurrent() {
     <div class="group">
       <h3>Dům</h3>
       <div class="row"><span class="label">Aktuální odběr</span><span class="val big">${W(s.load)}</span></div>
+      <div class="bar"><i style="width:${bar(s.load, L.maxLoad)}%"></i></div>
       <div class="row"><span class="label">Dnes spotřeba</span><span class="val">${kWh(s.totalConsumption, 2)}</span></div>
       <div class="row"><span class="label">Soběstačnost</span><span class="val">${pct(s.selfSufficiencyRate)}</span></div>
       <div class="bar"><i style="width:${bar(s.selfSufficiencyRate, 100)}%"></i></div>
@@ -88,7 +97,7 @@ function setStatus(text, cls) {
 let currentRange = 'live';
 const charts = {};
 
-function makeOpts(series) {
+function makeOpts(series, extra = {}) {
   return {
     width: document.querySelector('main').clientWidth - 32,
     height: 260,
@@ -98,6 +107,7 @@ function makeOpts(series) {
       { stroke: '#8b949e', grid: { stroke: '#21262d' } },
     ],
     legend: { live: true },
+    ...extra,
   };
 }
 
@@ -116,7 +126,7 @@ async function loadSeries(range) {
   const pSeries = [
     {},
     { label: 'Panely', stroke: '#f5b301', width: 1.5 },
-    { label: 'Zátěž', stroke: '#58a6ff', width: 1.5 },
+    { label: 'Odběr', stroke: '#58a6ff', width: 1.5 },
     { label: 'Baterie', stroke: '#3fb950', width: 1.5 },
     { label: 'Síť', stroke: '#ff6b6b', width: 1.5 },
   ];
@@ -124,13 +134,13 @@ async function loadSeries(range) {
 
   const sData = [ts, col('batterySoC')];
   const sSeries = [{}, { label: 'SoC %', stroke: '#f5b301', width: 1.5, fill: 'rgba(245,179,1,.12)' }];
-  rebuild('chartSoc', 'soc', sData, sSeries);
+  rebuild('chartSoc', 'soc', sData, sSeries, { scales: { y: { range: [0, 100] } } });
 }
 
-function rebuild(elId, key, data, series) {
+function rebuild(elId, key, data, series, extra) {
   const el = document.getElementById(elId);
   if (charts[key]) charts[key].destroy();
-  charts[key] = new uPlot(makeOpts(series), data, el);
+  charts[key] = new uPlot(makeOpts(series, extra), data, el);
 }
 
 function drawEmpty() {

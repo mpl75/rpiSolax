@@ -275,8 +275,24 @@ function showLoginForm(bool $error): void {
 HTML;
 }
 
+// Načte meze pro ukazatele (bary) ze solax.conf vedle index.php.
+function readConf(): array {
+    $limits = ['peak1' => 5000, 'peak2' => 5000, 'maxPower' => 10000, 'maxLoad' => 16000];
+    $f = __DIR__ . '/solax.conf';
+    if (is_file($f)) {
+        foreach (file($f, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+            if ($line === '' || $line[0] === '#' || strpos($line, '=') === false) continue;
+            [$k, $v] = explode('=', $line, 2);
+            $k = trim($k); $v = trim($v);
+            if (isset($limits[$k]) && is_numeric($v)) $limits[$k] = (int)$v;
+        }
+    }
+    return $limits;
+}
+
 function renderDashboard(): void {
-    $user = htmlspecialchars($_SESSION['user'] ?? '');
+    $user   = htmlspecialchars($_SESSION['user'] ?? '');
+    $limits = json_encode(readConf());
     echo <<<HTML
 <!DOCTYPE html><html lang="cs"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -308,6 +324,7 @@ function renderDashboard(): void {
   </section>
 </main>
 
+<script>window.LIMITS = $limits;</script>
 <script src="?asset=uplot.js"></script>
 <script src="?asset=app.js"></script>
 </body></html>

@@ -118,6 +118,13 @@ if (empty($_SESSION['authenticated']) && isset($_COOKIE['solax_auth'])) {
     }
 }
 
+// ---------- Router statických assetů (VEŘEJNÉ – manifest, ikony, css/js;
+//            musí být PŘED bránou, aby šly načíst i pro PWA / přihlašovací stránku) ----------
+if (isset($_GET['asset'])) {
+    serveAsset($_GET['asset']);
+    exit;
+}
+
 // ---------- Brána: bez přihlášení dál nepustíme ----------
 if (empty($_SESSION['authenticated'])) {
     showLoginForm($loginError);
@@ -127,12 +134,6 @@ if (empty($_SESSION['authenticated'])) {
 // =====================================================================
 //  Od tohoto místa je uživatel přihlášený
 // =====================================================================
-
-// ---------- Router statických assetů (přes PHP, ať nemusíme měnit vhost) ----------
-if (isset($_GET['asset'])) {
-    serveAsset($_GET['asset']);
-    exit;
-}
 
 // ---------- JSON API ----------
 if (isset($_GET['api'])) {
@@ -229,10 +230,15 @@ function handleApi(array $q, string $logDir): array {
 
 function serveAsset(string $name): void {
     $map = [
-        'app.js'    => 'application/javascript; charset=utf-8',
-        'style.css' => 'text/css; charset=utf-8',
-        'uplot.js'  => 'application/javascript; charset=utf-8',
-        'uplot.css' => 'text/css; charset=utf-8',
+        'app.js'        => 'application/javascript; charset=utf-8',
+        'style.css'     => 'text/css; charset=utf-8',
+        'uplot.js'      => 'application/javascript; charset=utf-8',
+        'uplot.css'     => 'text/css; charset=utf-8',
+        'manifest.json' => 'application/manifest+json; charset=utf-8',
+        'icon.svg'      => 'image/svg+xml',
+        'icon-192.png'  => 'image/png',
+        'icon-512.png'  => 'image/png',
+        'icon-180.png'  => 'image/png',
     ];
     if (!isset($map[$name])) { http_response_code(404); exit; }
     $path = __DIR__ . '/assets/' . $name;
@@ -250,6 +256,14 @@ function showLoginForm(bool $error): void {
 <!DOCTYPE html><html lang="cs"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solax – přihlášení</title>
+<meta name="theme-color" content="#0e1116">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Solax">
+<link rel="manifest" href="?asset=manifest.json">
+<link rel="apple-touch-icon" href="?asset=icon-180.png">
+<link rel="icon" type="image/png" href="?asset=icon-192.png">
 <style>
   :root { color-scheme: dark; }
   body { margin:0; min-height:100vh; display:grid; place-items:center;
@@ -297,6 +311,14 @@ function renderDashboard(): void {
 <!DOCTYPE html><html lang="cs"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Solax FVE</title>
+<meta name="theme-color" content="#0e1116">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Solax">
+<link rel="manifest" href="?asset=manifest.json">
+<link rel="apple-touch-icon" href="?asset=icon-180.png">
+<link rel="icon" type="image/png" href="?asset=icon-192.png">
 <link rel="stylesheet" href="?asset=uplot.css">
 <link rel="stylesheet" href="?asset=style.css">
 </head><body>

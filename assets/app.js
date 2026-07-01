@@ -104,6 +104,35 @@ function setStatus(text, cls) {
 let currentRange = 'live';
 const charts = {};
 
+// ---------- navigace po dnech (režim „Den") ----------
+const pad2 = (n) => String(n).padStart(2, '0');
+const dayStr = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const todayStr = () => dayStr(new Date());
+let currentDay = todayStr();
+
+// 'YYYY-MM-DD' -> lokální Date v poledne (poledne kvůli DST, ať krok o den nepřeskočí)
+function parseDay(s) {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d, 12, 0, 0);
+}
+function stepDay(delta) {
+  const d = parseDay(currentDay);
+  d.setDate(d.getDate() + delta);
+  setDay(dayStr(d));
+}
+function setDay(s) {
+  if (s > todayStr()) s = todayStr();   // do budoucna nechodíme
+  currentDay = s;
+  syncDayNav();
+  loadSeries('day');
+}
+function syncDayNav() {
+  const pick = document.getElementById('dayPick');
+  pick.value = currentDay;
+  pick.max = todayStr();
+  document.getElementById('dayNext').disabled = currentDay >= todayStr();
+}
+
 function makeOpts(series, extra = {}) {
   return {
     width: document.querySelector('main').clientWidth - 32,
@@ -119,9 +148,11 @@ function makeOpts(series, extra = {}) {
 }
 
 async function loadSeries(range) {
+  let url = '?api=series&range=' + range;
+  if (range === 'day') url += '&date=' + currentDay;
   let d;
   try {
-    const r = await fetch('?api=series&range=' + range, { cache: 'no-store' });
+    const r = await fetch(url, { cache: 'no-store' });
     d = await r.json();
   } catch (e) { return; }
   if (!d.ok || !d.count) { drawEmpty(); return; }
@@ -140,7 +171,7 @@ async function loadSeries(range) {
   rebuild('chartPower', 'power', pData, pSeries);
 
   const sData = [ts, col('batterySoC')];
-  const sSeries = [{}, { label: 'SoC %', stroke: '#f5b301', width: 1.5, fill: 'rgba(245,179,1,.12)' }];
+  const sSeries = [{}, { label: 'SoC %', stroke: '#3fb950', width: 1.5, fill: 'rgba(63,185,80,.12)' }];
   rebuild('chartSoc', 'soc', sData, sSeries, { scales: { y: { range: [0, 100] } } });
 }
 
@@ -164,8 +195,22 @@ document.querySelectorAll('.range button').forEach((b) => {
     document.querySelector('.range button.active').classList.remove('active');
     b.classList.add('active');
     currentRange = b.dataset.range;
+    const nav = document.getElementById('daynav');
+    if (currentRange === 'day') {
+      currentDay = todayStr();   // při vstupu do „Den" začni dneškem
+      syncDayNav();
+      nav.hidden = false;
+    } else {
+      nav.hidden = true;
+    }
     loadSeries(currentRange);
   });
+});
+
+document.getElementById('dayPrev').addEventListener('click', () => stepDay(-1));
+document.getElementById('dayNext').addEventListener('click', () => stepDay(1));
+document.getElementById('dayPick').addEventListener('change', (e) => {
+  if (e.target.value) setDay(e.target.value);
 });
 
 window.addEventListener('resize', () => {

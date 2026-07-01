@@ -200,14 +200,29 @@ function handleApi(array $q, string $logDir): array {
     if ($api === 'series') {
         $range = $q['range'] ?? 'day';
         $now   = time();
-        switch ($range) {
-            case 'live':  $from = $now - 1800;       break; // 30 min
-            case 'day':   $from = strtotime('today'); break;
-            case 'week':  $from = $now - 7 * 86400;  break;
-            case 'month': $from = $now - 30 * 86400; break;
-            default:      $from = strtotime('today');
+
+        // Volitelné konkrétní datum pro režim "day" (navigace po dnech).
+        // Striktní validace formátu + checkdate = zároveň ochrana proti
+        // path-traversal, protože dayRows() skládá cestu z $date.
+        $date = null;
+        if (isset($q['date']) && preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $q['date'], $m)
+            && checkdate((int)$m[2], (int)$m[3], (int)$m[1])) {
+            $date = $q['date'];
         }
-        $to = $now;
+
+        if ($range === 'day' && $date !== null) {
+            $from = strtotime($date . ' 00:00:00');
+            $to   = min($now, $from + 86400 - 1);   // budoucí dny se ořežou na teď
+        } else {
+            switch ($range) {
+                case 'live':  $from = $now - 1800;       break; // 30 min
+                case 'day':   $from = strtotime('today'); break;
+                case 'week':  $from = $now - 7 * 86400;  break;
+                case 'month': $from = $now - 30 * 86400; break;
+                default:      $from = strtotime('today');
+            }
+            $to = $now;
+        }
 
         // posbírej dny v rozsahu
         $cols = array_fill(0, count(FIELDS), []);
@@ -340,6 +355,11 @@ function renderDashboard(): void {
       <button data-range="day">Den</button>
       <button data-range="week">Týden</button>
       <button data-range="month">Měsíc</button>
+    </div>
+    <div class="daynav" id="daynav" hidden>
+      <button id="dayPrev" type="button" aria-label="Předchozí den">‹</button>
+      <input type="date" id="dayPick" aria-label="Vybrat datum">
+      <button id="dayNext" type="button" aria-label="Další den">›</button>
     </div>
     <div class="chart-card"><h2>Výkon (W)</h2><div id="chartPower"></div></div>
     <div class="chart-card"><h2>Stav baterie (%)</h2><div id="chartSoc"></div></div>

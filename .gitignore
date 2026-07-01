@@ -1,15 +1,14 @@
 .nova
 
-# Reálná konfigurace s hesly / sériovým číslem – do repa NEpatří
-web/config.json
+# Reálná konfigurace s hesly / sériovým číslem / authSecret – do repa NEpatří.
+# Veřejné vzory jsou config.sample.json a solax.conf.sample.
+config.json
+solax.conf
 
-# Logy
+# Logy (živá data, jen na Pi)
 logs/
 *.csv
 *.csv.gz
-
-# Lokální přepsání solax.conf na Pi (pokud bys ho verzoval zvlášť)
-solax.local.conf
 
 # macOS
 .DS_Store

@@ -3,50 +3,64 @@
 Vše leží v jednom adresáři `/var/www/html/rpiSolax` (vlastník `www-data`,
 stejně jako galerie). Logger i agregace běží jako `www-data`.
 
-## Struktura (v repu)
+## Struktura (plochá – repo je 1:1 se serverem)
+
+Struktura repa je **identická** s tím, co běží na Pi – žádné přesouvání ani
+zplošťování při nasazení. `index.php` hledá `config.json`, `solax.conf`
+i `assets/` ve své vlastní složce, takže vše leží vedle sebe:
 
 ```
+index.php             # PHP aplikace (jediný vstupní bod, servíruje i assety)
+assets/               # app.js, style.css, uPlot, ikony, manifest.json
+config.sample.json    # VZOR configu webu (v gitu); reálný config.json je gitignored
+solax.conf.sample     # VZOR configu skriptu (v gitu); reálný solax.conf je gitignored
 solax.sh              # logger (5s smyčka, TUI + volitelně log do CSV)
-solax.conf            # konfigurace (na Pi log=1 + reálné url/sn)
 solax-aggregate.sh    # denní agregace raw 5s -> 10min
-web/                  # PHP aplikace + assety
 systemd/              # 3 unit soubory
 deploy/               # tento návod + Apache snippet
+.htaccess             # zákaz přímého přístupu k .json/.csv/.conf/.sh
 ```
 
-Na Pi se vše slije do `/var/www/html/rpiSolax/` (web nahoře + skripty vedle).
+Reálné (tajné) `config.json` a `solax.conf` **nejsou v gitu** – vzniknou
+z `*.sample` souborů (viz níže). Lokálně je edituješ ty, na Pi je dostane sync.
 
-## 1. Nahrání souborů (rsync přímo do docrootu přes sudo)
+## 1. Nahrání souborů
+
+**Průběžný deploy (doporučeno):** ze svého repa spusť zrcadlící skript –
+udělá z Pi přesnou kopii lokálu (kromě `logs/`, viz `sync-rpi.sh`):
 
 ```bash
-# z Macu – web do kořene aplikace
-rsync -a --rsync-path="sudo rsync" web/ michal@raspberrypi.local:/var/www/html/rpiSolax/
-# z Macu – skripty + systemd + deploy vedle webu
+./sync-rpi.sh -n     # dry-run: ukáže, co by se změnilo
+./sync-rpi.sh        # ostrý sync
+```
+
+**První instalace na čistém Pi** (než existují reálné configy) – ruční varianta:
+
+```bash
 rsync -a --rsync-path="sudo rsync" \
-  solax.sh solax.conf solax-aggregate.sh systemd deploy \
-  michal@raspberrypi.local:/var/www/html/rpiSolax/
-```
-
-Práva + složka na logy:
-
-```bash
+  --exclude='.git/' --exclude='logs/' --exclude='*.csv*' \
+  ./ michal@raspberrypi.local:/var/www/html/rpiSolax/
 sudo chown -R www-data:www-data /var/www/html/rpiSolax
 sudo chmod +x /var/www/html/rpiSolax/solax.sh /var/www/html/rpiSolax/solax-aggregate.sh
 sudo -u www-data mkdir -p /var/www/html/rpiSolax/logs
 ```
 
-## 2. Konfigurace
+## 2. Konfigurace (z *.sample vzorů)
 
 ```bash
-# solax.conf: nastav reálné url/sn a zapni logování
-sudo nano /var/www/html/rpiSolax/solax.conf      # url=..., sn=..., log=1
+cd /var/www/html/rpiSolax
+# solax.conf: reálné url/sn, na Pi zapni logování (log=1)
+sudo -u www-data cp solax.conf.sample solax.conf
+sudo nano solax.conf                             # url=..., sn=..., log=1
 
-# config.json (NENÍ v repu) z config.sample.json
-sudo -u www-data cp /var/www/html/rpiSolax/config.sample.json /var/www/html/rpiSolax/config.json
-# bcrypt hash hesla pro web:
-php -r 'echo password_hash("TVOJE_HESLO", PASSWORD_DEFAULT), "\n";'
-sudo nano /var/www/html/rpiSolax/config.json     # vlož hash k uživateli
+# config.json: přihlašování do webu
+sudo -u www-data cp config.sample.json config.json
+php -r 'echo password_hash("TVOJE_HESLO", PASSWORD_DEFAULT), "\n";'   # bcrypt hash
+sudo nano config.json                            # vlož hash + náhodný authSecret
 ```
+
+> Pozn.: reálné `config.json` a `solax.conf` jsou gitignored. Když je jednou
+> vytvoříš (tady i lokálně), `./sync-rpi.sh` je pak udržuje sladěné.
 
 ## 3. Systemd (logger + denní agregace 03:30)
 

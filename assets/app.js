@@ -17,7 +17,8 @@ const INVERTER_MODE = [
 ];
 
 // Meze pro ukazatele (bary) – ze solax.conf, předané PHP do window.LIMITS
-const L = window.LIMITS || { peak1: 5000, peak2: 5000, maxPower: 10000, maxLoad: 16000 };
+const L = window.LIMITS || { peak1: 5000, peak2: 5000, maxPower: 10000, maxLoad: 16000, batteryMinSoC: 15 };
+if (L.batteryMinSoC == null) L.batteryMinSoC = 15;
 
 // Hodnoty vrací { n: číslo, u: jednotka } – číslo a jednotka mají vlastní
 // zarovnaný sloupec v mřížce (čísla vpravo, jednotky vlevo) jako v TUI.
@@ -27,6 +28,25 @@ const pct = (v) => (v == null ? { n: '–', u: '' } : { n: String(Math.round(v))
 const tempTxt = (v) => (v == null ? '–' : Math.round(v) + ' °C');
 const socTxt = (v) => (v == null ? '–' : Math.round(v) + ' %');
 const mode = (v) => (v == null || INVERTER_MODE[v] == null ? '–' : INVERTER_MODE[v]);
+
+// Odhad času do plna / do vybití (k rezervě L.batteryMinSoC). Vrací {label,n} nebo null.
+function batteryEta(s) {
+  const soc = s.batterySoC, cap = s.batteryCap, p = s.batteryPower;
+  if (soc == null || cap == null || p == null || soc <= 0) return null;
+  const total = cap / (soc / 100);   // celková kapacita [kWh]
+  const IDLE = 25;                   // práh klidu [W]
+  let label, energy;
+  if (p > IDLE)       { label = 'do plna';   energy = total * (100 - soc) / 100; }
+  else if (p < -IDLE) { label = 'do vybití'; energy = total * (soc - L.batteryMinSoC) / 100; }
+  else return { label: 'baterie', n: 'klid' };
+  if (energy <= 0) return { label, n: '–' };
+  return { label, n: fmtDur(energy / (Math.abs(p) / 1000)) };
+}
+// kompaktní formát h:mm (např. 2:34), ať se vejde do sloupce s čísly
+function fmtDur(h) {
+  const m = Math.round(h * 60);
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`;
+}
 
 // ---------- živé dlaždice ----------
 async function refreshCurrent() {
@@ -39,6 +59,7 @@ async function refreshCurrent() {
   if (!s) { setStatus('zatím žádná data', 'stale'); return; }
   setStatus(s.age <= 30 ? 'živě' : `naposledy před ${s.age}s`, s.age <= 30 ? 'live' : 'stale');
 
+  const eta = batteryEta(s);
   document.getElementById('tiles').innerHTML = `
     <div class="group">
       <h3>Panely</h3>
@@ -54,6 +75,7 @@ async function refreshCurrent() {
       <div class="metrics">
         ${row('nabití', kWh(s.batteryCap), { bar: bar(s.batterySoC, 100) })}
         ${row(s.batteryPower >= 0 ? 'nabíjení' : 'vybíjení', W(s.batteryPower), { cls: s.batteryPower >= 0 ? 'pos' : 'neg' })}
+        ${eta ? row(eta.label, { n: eta.n, u: '' }) : ''}
         ${row('dnes nabito', kWh(s.totalChargedIn))}
         ${row('vybito', kWh(s.totalChargedOut))}
       </div>
@@ -155,7 +177,10 @@ async function loadSeries(range) {
     const r = await fetch(url, { cache: 'no-store' });
     d = await r.json();
   } catch (e) { return; }
-  if (!d.ok || !d.count) { drawEmpty(); return; }
+
+  const balEl = document.getElementById('balance');
+  if (!d.ok || !d.count) { drawEmpty(); if (range === 'day') balEl.hidden = true; return; }
+  if (range === 'day') { balEl.innerHTML = balanceHtml(d); balEl.hidden = false; }
 
   const col = (name) => d.data[F[name]].map((x) => (x === null ? null : +x));
   const ts = d.data[F.timestamp].map((x) => +x);
@@ -189,21 +214,75 @@ function drawEmpty() {
   charts.power = charts.soc = null;
 }
 
+// ---------- denní bilance (režim „Den") ----------
+function lastVal(arr) { for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != null) return arr[i]; return null; }
+
+function balanceHtml(d) {
+  const lv = (name) => lastVal(d.data[F[name]]);
+  const k = (v) => (v == null ? '–' : (+v).toFixed(1).replace('.', ','));
+  const soc = lv('selfSufficiencyRate');
+  const items = [
+    ['Výroba DC', k(lv('totalProduction')), 'kWh'],
+    ['Výroba AC', k(lv('totalProductionInclBatt')), 'kWh'],
+    ['Spotřeba', k(lv('totalConsumption')), 'kWh'],
+    ['Ze sítě', k(lv('totalGridIn')), 'kWh'],
+    ['Do sítě', k(lv('totalGridOut')), 'kWh'],
+    ['Nabito', k(lv('totalChargedIn')), 'kWh'],
+    ['Vybito', k(lv('totalChargedOut')), 'kWh'],
+    ['Soběstačnost', soc == null ? '–' : Math.round(soc), '%'],
+  ];
+  return items.map(([l, v, u]) =>
+    `<div class="bal-item"><span class="bal-label">${l}</span><span class="bal-val">${v}<small>${u}</small></span></div>`).join('');
+}
+
+// ---------- denní sloupcový přehled (Týden/Měsíc) ----------
+async function loadDaily(range) {
+  let d;
+  try {
+    const r = await fetch('?api=daily&range=' + range, { cache: 'no-store' });
+    d = await r.json();
+  } catch (e) { return; }
+  const el = document.getElementById('chartDaily');
+  if (!d.ok || !d.count) { el.innerHTML = '<p style="color:#8b949e">Žádná data pro toto období.</p>'; return; }
+
+  const max = Math.max(1, ...d.production.map((v) => v || 0), ...d.consumption.map((v) => v || 0));
+  const fmt = (v) => (v == null ? '–' : v.toFixed(1).replace('.', ','));
+  const h = (v) => ((v || 0) / max * 100).toFixed(1);
+  const bars = d.ts.map((t, i) => {
+    const dt = new Date(t * 1000);
+    const lbl = `${dt.getDate()}.${dt.getMonth() + 1}.`;
+    const p = d.production[i], c = d.consumption[i];
+    return `<div class="day"><div class="bars">` +
+      `<i class="prod" style="height:${h(p)}%" title="${lbl} výroba ${fmt(p)} kWh"></i>` +
+      `<i class="cons" style="height:${h(c)}%" title="${lbl} spotřeba ${fmt(c)} kWh"></i>` +
+      `</div><span class="dlabel">${lbl}</span></div>`;
+  }).join('');
+  el.innerHTML =
+    `<div class="daily-legend"><span><i style="background:var(--accent)"></i>Výroba</span>` +
+    `<span><i style="background:var(--blue)"></i>Spotřeba</span></div>` +
+    `<div class="daily">${bars}</div>`;
+}
+
 // ---------- ovládání ----------
+function applyRange(range) {
+  currentRange = range;
+  const isDay = range === 'day';
+  const isAgg = range === 'week' || range === 'month';
+  document.getElementById('daynav').hidden = !isDay;
+  document.getElementById('balance').hidden = !isDay;
+  document.getElementById('cardPower').hidden = isAgg;   // řádkové grafy jen Živě/Den
+  document.getElementById('cardSoc').hidden = isAgg;
+  document.getElementById('cardDaily').hidden = !isAgg;  // sloupce jen Týden/Měsíc
+  if (isDay) { currentDay = todayStr(); syncDayNav(); }
+  if (isAgg) loadDaily(range);
+  else loadSeries(range);
+}
+
 document.querySelectorAll('.range button').forEach((b) => {
   b.addEventListener('click', () => {
     document.querySelector('.range button.active').classList.remove('active');
     b.classList.add('active');
-    currentRange = b.dataset.range;
-    const nav = document.getElementById('daynav');
-    if (currentRange === 'day') {
-      currentDay = todayStr();   // při vstupu do „Den" začni dneškem
-      syncDayNav();
-      nav.hidden = false;
-    } else {
-      nav.hidden = true;
-    }
-    loadSeries(currentRange);
+    applyRange(b.dataset.range);
   });
 });
 

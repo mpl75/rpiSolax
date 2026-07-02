@@ -5,6 +5,8 @@ peak2=5000
 maxPower=10000
 maxLoad=16000
 delay=4
+# Rezerva baterie (min. SoC %), ke které BMS vybíjí – pro odhad „do vybití" ve webu
+batteryMinSoC=15
 
 # --- Logování (přidáno) ---
 # log=1 zapne ukládání do CSV. Na Macu nech 0, na Raspberry nastav 1.

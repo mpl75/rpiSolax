@@ -152,6 +152,32 @@ main { padding: 1.2rem; max-width: 1700px; margin: 0 auto; }
   color-scheme: dark;
 }
 
+/* denní bilance (režim „Den") */
+.balance { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.balance[hidden] { display: none; }
+.bal-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .4rem .7rem;
+  min-width: 6.5rem;
+  flex: 1 1 auto;
+}
+.bal-label { display: block; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: .1rem; }
+.bal-val { font-size: 1.15rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.bal-val small { font-size: .72rem; font-weight: 400; color: var(--muted); margin-left: .15rem; }
+
+/* denní sloupcový přehled (Týden/Měsíc) */
+.daily-legend { display: flex; gap: 1.2rem; margin-bottom: .8rem; font-size: .82rem; color: var(--muted); }
+.daily-legend i { display: inline-block; width: .8rem; height: .8rem; border-radius: 2px; margin-right: .35rem; vertical-align: -1px; }
+.daily { display: flex; align-items: flex-end; gap: .4rem; height: 240px; }
+.daily .day { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; height: 100%; min-width: 0; }
+.daily .bars { flex: 1; width: 100%; display: flex; align-items: flex-end; justify-content: center; gap: 3px; }
+.daily .bars > i { width: 42%; max-width: 22px; border-radius: 3px 3px 0 0; min-height: 1px; }
+.daily .bars > i.prod { background: var(--accent); }
+.daily .bars > i.cons { background: var(--blue); }
+.daily .dlabel { font-size: .68rem; color: var(--muted); margin-top: .35rem; white-space: nowrap; }
+
 .chart-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -159,6 +185,7 @@ main { padding: 1.2rem; max-width: 1700px; margin: 0 auto; }
   padding: 1rem;
   margin-bottom: 1.2rem;
 }
+.chart-card[hidden] { display: none; }
 .chart-card h2 { margin: 0 0 .8rem; font-size: .95rem; color: var(--muted); }
 
 /* uPlot v tmavém motivu */

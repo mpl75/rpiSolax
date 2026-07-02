@@ -240,6 +240,26 @@ function handleApi(array $q, string $logDir): array {
         return ['ok' => true, 'fields' => FIELDS, 'data' => $cols, 'count' => count($cols[0])];
     }
 
+    if ($api === 'daily') {
+        // Denní souhrny pro sloupcový přehled (Týden/Měsíc): jedna hodnota na den.
+        // Kumulativní „dnes…" čítače = poslední řádek dne.
+        $range = $q['range'] ?? 'week';
+        $days  = $range === 'month' ? 30 : 7;
+        $fi    = array_flip(FIELDS);
+        $now   = time();
+        $start = strtotime(date('Y-m-d', $now)) - ($days - 1) * 86400;
+
+        $ts = $prod = $cons = [];
+        for ($d = $start; $d <= $now; $d += 86400) {
+            $rows = dayRows($logDir, date('Y-m-d', $d));
+            $last = $rows ? end($rows) : null;
+            $ts[]   = $d;
+            $prod[] = $last !== null && isset($last[$fi['totalProduction']])  ? $last[$fi['totalProduction']]  + 0 : null;
+            $cons[] = $last !== null && isset($last[$fi['totalConsumption']]) ? $last[$fi['totalConsumption']] + 0 : null;
+        }
+        return ['ok' => true, 'ts' => $ts, 'production' => $prod, 'consumption' => $cons, 'count' => count($ts)];
+    }
+
     return ['ok' => false, 'error' => 'unknown api'];
 }
 
@@ -306,7 +326,7 @@ HTML;
 
 // Načte meze pro ukazatele (bary) ze solax.conf vedle index.php.
 function readConf(): array {
-    $limits = ['peak1' => 5000, 'peak2' => 5000, 'maxPower' => 10000, 'maxLoad' => 16000];
+    $limits = ['peak1' => 5000, 'peak2' => 5000, 'maxPower' => 10000, 'maxLoad' => 16000, 'batteryMinSoC' => 15];
     $f = __DIR__ . '/solax.conf';
     if (is_file($f)) {
         foreach (file($f, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
@@ -361,8 +381,10 @@ function renderDashboard(): void {
       <input type="date" id="dayPick" aria-label="Vybrat datum">
       <button id="dayNext" type="button" aria-label="Další den">›</button>
     </div>
-    <div class="chart-card"><h2>Výkon (W)</h2><div id="chartPower"></div></div>
-    <div class="chart-card"><h2>Stav baterie (%)</h2><div id="chartSoc"></div></div>
+    <div class="balance" id="balance" hidden><!-- denní bilance doplní JS --></div>
+    <div class="chart-card" id="cardPower"><h2>Výkon (W)</h2><div id="chartPower"></div></div>
+    <div class="chart-card" id="cardSoc"><h2>Stav baterie (%)</h2><div id="chartSoc"></div></div>
+    <div class="chart-card" id="cardDaily" hidden><h2>Denní přehled – výroba vs spotřeba (kWh)</h2><div id="chartDaily"></div></div>
   </section>
 </main>
 

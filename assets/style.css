@@ -81,7 +81,6 @@ main { padding: 1.2rem; max-width: 1700px; margin: 0 auto; }
   text-transform: none;
   letter-spacing: 0;
 }
-.group h3 .hsoc { color: var(--accent); font-weight: 700; font-size: .95rem; }
 .group h3 .htemp { color: var(--muted); font-weight: 400; font-size: .9rem; }
 /* mřížka metrik: popisek | číslo (vpravo) | jednotka (vlevo) | bar.
    Sloupce sdílené přes celý panel => čísla, jednotky i bary jsou přesně pod sebou. */
@@ -112,6 +111,19 @@ main { padding: 1.2rem; max-width: 1700px; margin: 0 auto; }
 /* ukazatel naplnění – vyplní zbylou šířku; světlejší dráha, ať je vidět */
 .ibar { width: 100%; height: 10px; background: #3a414d; border-radius: 5px; overflow: hidden; }
 .ibar > i { display: block; height: 100%; background: var(--accent); }
+
+/* --- „budík" – plněný oblouk 240° s velkou hodnotou uprostřed --- */
+.gauge { display: block; width: 68%; max-width: 210px; margin: .15rem auto .3rem; }
+.gauge .gtrack, .gauge .gfill { fill: none; stroke-width: 10; stroke-linecap: round; }
+.gauge .gtrack { stroke: #3a414d; }
+.gauge .gfill { stroke: var(--accent); }
+.gauge .gticks line { stroke: var(--muted); stroke-width: 1; opacity: .55; }
+.gauge .gnum { fill: var(--accent); font-size: 24px; font-weight: 700; text-anchor: middle; font-variant-numeric: tabular-nums; }
+.gauge .gunit { fill: var(--muted); font-size: 10px; text-anchor: middle; }
+.gauge .glim { fill: var(--muted); font-size: 7px; text-anchor: middle; }
+/* zelená varianta (Baterie) */
+.gauge.green .gfill { stroke: var(--green); }
+.gauge.green .gnum { fill: var(--green); }
 
 /* --- grafy --- */
 .range { display: flex; gap: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }
@@ -192,10 +204,33 @@ main { padding: 1.2rem; max-width: 1700px; margin: 0 auto; }
 .u-axis { color: var(--muted); }
 .uplot { width: 100%; }
 
-/* mobil – těsnější okraje, ať se panely vejdou na obrazovku */
+/* mobil – těsnější okraje; panely po dvou vedle sebe, jen poslední (Dům)
+   přes celou šířku. Musí fungovat až dolů k 320px šířky. */
 @media (max-width: 640px) {
   main { padding: .6rem; }
   header { padding: .55rem .7rem; }
-  .tiles { grid-template-columns: 1fr; gap: .45rem; }
+  .tiles { grid-template-columns: 1fr 1fr; gap: .4rem; }
+  .group { padding: .4rem .5rem .5rem; }
+  .group:last-child { grid-column: 1 / -1; }
+  /* hlavička s badge/teplotou se v půlkové kartě smí zalomit */
+  .group h3 { flex-wrap: wrap; row-gap: .1rem; }
   .metrics { font-size: .92rem; }
+  /* poloviční karta: stejné písmo jako plná šířka, jen sloupce podle obsahu
+     místo pevných šířek a popisky se smí zalomit, ať se mřížka vejde */
+  .group:not(:last-child) .metrics {
+    grid-template-columns: auto auto auto minmax(0, 1fr);
+    column-gap: .3em;
+  }
+  .group:not(:last-child) .metrics .label {
+    white-space: normal;
+    text-align: right;
+    line-height: 1.15;
+  }
+  /* bar se v půlkové kartě nevejde vedle čísla – dostane vlastní tenký
+     řádek pod hodnotou, přes celou šířku karty */
+  .group:not(:last-child) .metrics .ibar {
+    grid-column: 1 / -1;
+    height: 5px;
+    margin: .1rem 0 .3rem;
+  }
 }

@@ -26,7 +26,6 @@ const W = (v) => (v == null ? { n: '–', u: '' } : { n: String(Math.round(v)), 
 const kWh = (v, d = 1) => (v == null ? { n: '–', u: '' } : { n: v.toFixed(d).replace('.', ','), u: 'kWh' });
 const pct = (v) => (v == null ? { n: '–', u: '' } : { n: String(Math.round(v)), u: '%' });
 const tempTxt = (v) => (v == null ? '–' : Math.round(v) + ' °C');
-const socTxt = (v) => (v == null ? '–' : Math.round(v) + ' %');
 const mode = (v) => (v == null || INVERTER_MODE[v] == null ? '–' : INVERTER_MODE[v]);
 
 // Odhad času do plna / do vybití (k rezervě L.batteryMinSoC). Vrací {label,n} nebo null.
@@ -63,17 +62,17 @@ async function refreshCurrent() {
   document.getElementById('tiles').innerHTML = `
     <div class="group">
       <h3>Panely</h3>
+      ${gauge(s.totalPower, L.peak1 + L.peak2)}
       <div class="metrics">
-        ${row('celkem', W(s.totalPower), { bar: bar(s.totalPower, L.peak1 + L.peak2), hl: true })}
         ${row('string 1', W(s.pv1Power), { bar: bar(s.pv1Power, L.peak1) })}
         ${row('string 2', W(s.pv2Power), { bar: bar(s.pv2Power, L.peak2) })}
         ${row('dnes výroba DC', kWh(s.totalProduction))}
       </div>
     </div>
     <div class="group">
-      <h3><span class="htitle">Baterie</span><span class="hmeta"><span class="hsoc">${socTxt(s.batterySoC)}</span><span class="htemp">${tempTxt(s.batteryTemp)}</span></span></h3>
+      <h3><span class="htitle">Baterie</span><span class="hmeta"><span class="htemp">${tempTxt(s.batteryTemp)}</span></span></h3>
+      ${gauge(s.batterySoC, 100, { val: pct(s.batterySoC), lim: ['0', '100 %'], cls: 'green', label: 'stav baterie' })}
       <div class="metrics">
-        ${row('nabití', kWh(s.batteryCap), { bar: bar(s.batterySoC, 100) })}
         ${row(s.batteryPower >= 0 ? 'nabíjení' : 'vybíjení', W(s.batteryPower), { cls: s.batteryPower >= 0 ? 'pos' : 'neg' })}
         ${eta ? row(eta.label, { n: eta.n, u: '' }) : ''}
         ${row('dnes nabito', kWh(s.totalChargedIn))}
@@ -106,6 +105,36 @@ async function refreshCurrent() {
 }
 
 const bar = (v, max) => Math.max(0, Math.min(100, ((v || 0) / max) * 100)).toFixed(0);
+
+// „Budík": plněný oblouk 240° (otevřený dole, 150°→390° po směru ručiček),
+// uprostřed velká hodnota. Naplnění řeší pathLength=100 + stroke-dasharray,
+// takže dráha i výplň sdílejí stejnou cestu. Souřadnice: střed (60,58), viewBox 120×100.
+// o.val = formátovaná hodnota {n,u} (výchozí W), o.lim = [levý, pravý] popisek stupnice,
+// o.cls = barevná varianta (např. 'green'), o.label = popisek pro aria-label.
+function gauge(v, max, o = {}) {
+  const val = o.val || W(v);
+  const frac = Math.max(0, Math.min(1, (v || 0) / max));
+  const pt = (deg, r) => {
+    const a = (deg * Math.PI) / 180;
+    return { x: (60 + r * Math.cos(a)).toFixed(1), y: (58 + r * Math.sin(a)).toFixed(1) };
+  };
+  const s0 = pt(150, 44), s1 = pt(30, 44);
+  const arc = `M ${s0.x} ${s0.y} A 44 44 0 1 1 ${s1.x} ${s1.y}`;
+  const ticks = [150, 210, 270, 330, 390].map((d) => {
+    const p = pt(d, 51), q = pt(d, 55);
+    return `<line x1="${p.x}" y1="${p.y}" x2="${q.x}" y2="${q.y}"/>`;
+  }).join('');
+  const lim = o.lim || ['0', String(Math.round(max / 100) / 10).replace('.', ',') + ' kW'];
+  return `<svg class="gauge${o.cls ? ' ' + o.cls : ''}" viewBox="0 0 120 100" role="img" aria-label="${o.label || 'celkem'} ${val.n} ${val.u}">
+    <path class="gtrack" d="${arc}"/>
+    ${frac > 0 ? `<path class="gfill" d="${arc}" pathLength="100" stroke-dasharray="${(frac * 100).toFixed(1)} 100"/>` : ''}
+    <g class="gticks">${ticks}</g>
+    <text class="gnum" x="60" y="62">${val.n}</text>
+    <text class="gunit" x="60" y="77">${val.u}</text>
+    <text class="glim" x="${s0.x}" y="93">${lim[0]}</text>
+    <text class="glim" x="${s1.x}" y="93">${lim[1]}</text>
+  </svg>`;
+}
 
 // Čtyři buňky mřížky .metrics: popisek | číslo (vpravo) | jednotka (vlevo) | bar.
 // Sdílené sloupce v rámci panelu => čísla, jednotky i bary jsou přesně pod sebou.

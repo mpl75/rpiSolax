@@ -162,6 +162,51 @@ function dayRows(string $logDir, string $date): array {
     return [];
 }
 
+/** Přečte ze syrového CSV jen řádky s timestampem >= $fromTs (chronologicky).
+ *  Čte soubor od konce po blocích, takže cena nezávisí na velikosti celého
+ *  dne – toho využívá živý graf a dlaždice, které se dotazují v smyčce. */
+function tailRows(string $file, int $fromTs): array {
+    $fh = @fopen($file, 'rb');
+    if (!$fh) return [];
+    $pos = fstat($fh)['size'];
+    $buf = '';
+    while ($pos > 0) {
+        $chunk = min(8192, $pos);
+        $pos  -= $chunk;
+        fseek($fh, $pos);
+        $buf = fread($fh, $chunk) . $buf;
+        // Jakmile je nejstarší kompletní řádek v bufferu starší než $fromTs,
+        // zbytek souboru už není potřeba (řádky jsou chronologické).
+        $nl = strpos($buf, "\n");
+        if ($nl !== false && (int)substr($buf, $nl + 1, 12) < $fromTs) break;
+    }
+    fclose($fh);
+    $rows = [];
+    foreach (explode("\n", $buf) as $line) {
+        $line = trim($line);
+        // (int) vezme číslo do první čárky; hlavičku ("timestamp,...") i případný
+        // neúplný první řádek to vyhodnotí < $fromTs a zahodí
+        if ($line === '' || (int)$line < $fromTs) continue;
+        $rows[] = explode(',', $line);
+    }
+    return $rows;
+}
+
+/** Poslední řádek syrového CSV (bez čtení celého souboru), null když není. */
+function lastRow(string $file): ?array {
+    $fh = @fopen($file, 'rb');
+    if (!$fh) return null;
+    $size = fstat($fh)['size'];
+    fseek($fh, max(0, $size - 8192));
+    $lines = explode("\n", fread($fh, 8192));
+    fclose($fh);
+    for ($i = count($lines) - 1; $i >= 0; $i--) {
+        $line = trim($lines[$i]);
+        if ($line !== '' && (int)$line > 0) return explode(',', $line);
+    }
+    return null;
+}
+
 function readCsv(string $file, bool $gz = false): array {
     $rows = [];
     $fh   = $gz ? gzopen($file, 'rb') : fopen($file, 'rb');
@@ -181,12 +226,12 @@ function handleApi(array $q, string $logDir): array {
     $api = $q['api'];
 
     if ($api === 'current') {
-        // poslední vzorek z dnešního (popř. včerejšího) syrového logu
+        // poslední vzorek z dnešního (popř. včerejšího) syrového logu;
+        // čte se jen konec souboru, ne celý den
         foreach ([date('Y-m-d'), date('Y-m-d', time() - 86400)] as $d) {
-            $rows = dayRows($logDir, $d);
-            if ($rows) {
-                $last = end($rows);
-                $obj  = [];
+            $last = lastRow("$logDir/raw/$d.csv");
+            if ($last !== null) {
+                $obj = [];
                 foreach (FIELDS as $i => $name) {
                     $obj[$name] = isset($last[$i]) ? $last[$i] + 0 : null;
                 }
@@ -224,14 +269,26 @@ function handleApi(array $q, string $logDir): array {
             $to = $now;
         }
 
+        // Týden/Měsíc: dnešek a včerejšek jsou ještě v 5s syrových logách,
+        // takže je prořeď na 10min krok jako agregáty (jinak by odpověď
+        // za 30 dní měla desítky tisíc řádků).
+        $step = ($range === 'week' || $range === 'month') ? 600 : 0;
+        $lastTs = null;
+
         // posbírej dny v rozsahu
         $cols = array_fill(0, count(FIELDS), []);
         $startDay = strtotime(date('Y-m-d', $from));
         for ($d = $startDay; $d <= $to; $d += 86400) {
-            $rows = dayRows($logDir, date('Y-m-d', $d));
+            $dd = date('Y-m-d', $d);
+            // Živě (30min okno, dotazované v smyčce): syrový soubor čti od konce,
+            // ať se kvůli pár stovkám řádků neparsuje celý den za každého klienta.
+            $rawF = "$logDir/raw/$dd.csv";
+            $rows = ($range === 'live' && is_file($rawF)) ? tailRows($rawF, $from) : dayRows($logDir, $dd);
             foreach ($rows as $r) {
                 $ts = (int)($r[0] ?? 0);
                 if ($ts < $from || $ts > $to) continue;
+                if ($step && $lastTs !== null && $ts - $lastTs < $step) continue;
+                $lastTs = $ts;
                 foreach (array_keys(FIELDS) as $i) {
                     $cols[$i][] = isset($r[$i]) ? $r[$i] + 0 : null;
                 }
@@ -383,7 +440,7 @@ function renderDashboard(): void {
     </div>
     <div class="balance" id="balance" hidden><!-- denní bilance doplní JS --></div>
     <div class="chart-card" id="cardPower"><h2>Výkon (W)</h2><div id="chartPower"></div></div>
-    <div class="chart-card" id="cardSoc"><h2>Stav baterie (%)</h2><div id="chartSoc"></div></div>
+    <div class="chart-card" id="cardSoc"><h2>Baterie a soběstačnost (%)</h2><div id="chartSoc"></div></div>
     <div class="chart-card" id="cardDaily" hidden><h2>Denní přehled – výroba vs spotřeba (kWh)</h2><div id="chartDaily"></div></div>
   </section>
 </main>

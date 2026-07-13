@@ -20,6 +20,10 @@ const INVERTER_MODE = [
 const L = window.LIMITS || { peak1: 5000, peak2: 5000, maxPower: 10000, maxLoad: 16000, batteryMinSoC: 15 };
 if (L.batteryMinSoC == null) L.batteryMinSoC = 15;
 
+// Soběstačnost = podíl dnešní spotřeby pokrytý vlastními zdroji. Dokud je denní
+// spotřeba maličká (těsně po půlnoci), je to jen šum – pod tímhle prahem se skryje.
+const SSR_MIN_KWH = 0.5;
+
 // Hodnoty vrací { n: číslo, u: jednotka } – číslo a jednotka mají vlastní
 // zarovnaný sloupec v mřížce (čísla vpravo, jednotky vlevo) jako v TUI.
 const W = (v) => (v == null ? { n: '–', u: '' } : { n: String(Math.round(v)), u: 'W' });
@@ -59,6 +63,7 @@ async function refreshCurrent() {
   setStatus(s.age <= 30 ? 'živě' : `naposledy před ${s.age}s`, s.age <= 30 ? 'live' : 'stale');
 
   const eta = batteryEta(s);
+  const ssr = s.totalConsumption >= SSR_MIN_KWH ? s.selfSufficiencyRate : null;
   document.getElementById('tiles').innerHTML = `
     <div class="group">
       <h3>Panely</h3>
@@ -99,7 +104,7 @@ async function refreshCurrent() {
       <div class="metrics">
         ${row('aktuální odběr', W(s.load), { bar: bar(s.load, L.maxLoad), hl: true })}
         ${row('dnes spotřeba', kWh(s.totalConsumption, 2))}
-        ${row('soběstačnost', pct(s.selfSufficiencyRate), { bar: bar(s.selfSufficiencyRate, 100) })}
+        ${row('soběstačnost', pct(ssr), { bar: bar(ssr, 100) })}
       </div>
     </div>`;
 }
@@ -214,33 +219,72 @@ async function loadSeries(range) {
   const col = (name) => d.data[F[name]].map((x) => (x === null ? null : +x));
   const ts = d.data[F.timestamp].map((x) => +x);
 
-  const pData = [ts, col('totalPower'), col('load'), col('batteryPower'), col('feedInPower')];
-  const pSeries = [
-    {},
-    { label: 'Panely', stroke: '#f5b301', width: 1.5 },
-    { label: 'Odběr', stroke: '#58a6ff', width: 1.5 },
-    { label: 'Baterie', stroke: '#3fb950', width: 1.5 },
-    { label: 'Síť', stroke: '#ff6b6b', width: 1.5 },
-  ];
-  rebuild('chartPower', 'power', pData, pSeries);
+  // Výkonový graf jen v režimech Živě/Den (v Týden/Měsíc je karta skrytá)
+  if (range !== 'week' && range !== 'month') {
+    const pData = [ts, col('totalPower'), col('load'), col('batteryPower'), col('feedInPower')];
+    const pSeries = [
+      {},
+      { label: 'Panely', stroke: '#f5b301', width: 1.5 },
+      { label: 'Odběr', stroke: '#58a6ff', width: 1.5 },
+      { label: 'Baterie', stroke: '#3fb950', width: 1.5 },
+      { label: 'Síť', stroke: '#ff6b6b', width: 1.5 },
+    ];
+    rebuild('chartPower', 'power', pData, pSeries);
+  }
 
-  const sData = [ts, col('batterySoC')];
-  const sSeries = [{}, { label: 'SoC %', stroke: '#3fb950', width: 1.5, fill: 'rgba(63,185,80,.12)' }];
+  // Soběstačnost je kumulativní od půlnoci – přes den konverguje ke konečné
+  // denní hodnotě. V Živě/Den se kreslí průběh (bez šumu pod prahem spotřeby),
+  // v Týden/Měsíc má granularitu jeden den: celý den = koncová hodnota dne.
+  const isAgg = range === 'week' || range === 'month';
+  const cons = col('totalConsumption');
+  let ssr = col('selfSufficiencyRate').map((v, i) => (cons[i] >= SSR_MIN_KWH ? v : null));
+  if (isAgg) ssr = dailySteps(ts, ssr);
+
+  const sData = [ts, col('batterySoC'), ssr];
+  const sSeries = [
+    {},
+    { label: 'SoC %', stroke: '#3fb950', width: 1.5, fill: 'rgba(63,185,80,.12)' },
+    { label: isAgg ? 'Soběstačnost % (za den)' : 'Soběstačnost %', stroke: '#f5b301', width: 1.5 },
+  ];
   rebuild('chartSoc', 'soc', sData, sSeries, { scales: { y: { range: [0, 100] } } });
+}
+
+// Denní granularita: každému vzorku přiřadí poslední ne-null hodnotu jeho
+// (lokálního) dne, takže z průběžné křivky vzniknou vodorovné denní schody.
+function dailySteps(ts, vals) {
+  const out = new Array(ts.length).fill(null);
+  const day = (t) => new Date(t * 1000).toDateString();
+  let start = 0;
+  for (let i = 1; i <= ts.length; i++) {
+    if (i === ts.length || day(ts[i]) !== day(ts[start])) {
+      let v = null;
+      for (let j = i - 1; j >= start; j--) if (vals[j] != null) { v = vals[j]; break; }
+      for (let j = start; j < i; j++) out[j] = v;
+      start = i;
+    }
+  }
+  return out;
 }
 
 function rebuild(elId, key, data, series, extra) {
   const el = document.getElementById(elId);
-  if (charts[key]) charts[key].destroy();
+  const old = charts[key];
+  if (old) {
+    // přenes zapnuto/vypnuto z legendy, ať to obnova grafu neresetuje
+    // (při jiné struktuře sérií – přepnutí režimu – se nechá výchozí stav)
+    if (old.series.length === series.length) {
+      series.forEach((s, i) => { if (i > 0) s.show = old.series[i].show; });
+    }
+    old.destroy();
+  }
   charts[key] = new uPlot(makeOpts(series, extra), data, el);
 }
 
 function drawEmpty() {
-  ['chartPower', 'chartSoc'].forEach((id) => {
-    if (charts[id]) { charts[id].destroy(); }
+  [['chartPower', 'power'], ['chartSoc', 'soc']].forEach(([id, key]) => {
+    if (charts[key]) { charts[key].destroy(); charts[key] = null; }
     document.getElementById(id).innerHTML = '<p style="color:#8b949e">Žádná data pro toto období.</p>';
   });
-  charts.power = charts.soc = null;
 }
 
 // ---------- denní bilance (režim „Den") ----------
@@ -249,7 +293,7 @@ function lastVal(arr) { for (let i = arr.length - 1; i >= 0; i--) if (arr[i] != 
 function balanceHtml(d) {
   const lv = (name) => lastVal(d.data[F[name]]);
   const k = (v) => (v == null ? '–' : (+v).toFixed(1).replace('.', ','));
-  const soc = lv('selfSufficiencyRate');
+  const soc = lv('totalConsumption') >= SSR_MIN_KWH ? lv('selfSufficiencyRate') : null;
   const items = [
     ['Výroba DC', k(lv('totalProduction')), 'kWh'],
     ['Výroba AC', k(lv('totalProductionInclBatt')), 'kWh'],
@@ -299,12 +343,11 @@ function applyRange(range) {
   const isAgg = range === 'week' || range === 'month';
   document.getElementById('daynav').hidden = !isDay;
   document.getElementById('balance').hidden = !isDay;
-  document.getElementById('cardPower').hidden = isAgg;   // řádkové grafy jen Živě/Den
-  document.getElementById('cardSoc').hidden = isAgg;
+  document.getElementById('cardPower').hidden = isAgg;   // výkonový graf jen Živě/Den
   document.getElementById('cardDaily').hidden = !isAgg;  // sloupce jen Týden/Měsíc
   if (isDay) { currentDay = todayStr(); syncDayNav(); }
   if (isAgg) loadDaily(range);
-  else loadSeries(range);
+  loadSeries(range);   // graf baterie + soběstačnosti jede ve všech režimech
 }
 
 document.querySelectorAll('.range button').forEach((b) => {

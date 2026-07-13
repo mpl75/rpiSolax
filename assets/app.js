@@ -160,33 +160,102 @@ function setStatus(text, cls) {
 let currentRange = 'live';
 const charts = {};
 
-// ---------- navigace po dnech (režim „Den") ----------
+// ---------- navigace po obdobích (Den / kalendářní Týden / kalendářní Měsíc) ----------
 const pad2 = (n) => String(n).padStart(2, '0');
 const dayStr = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 const todayStr = () => dayStr(new Date());
-let currentDay = todayStr();
+const ymStr = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 
 // 'YYYY-MM-DD' -> lokální Date v poledne (poledne kvůli DST, ať krok o den nepřeskočí)
 function parseDay(s) {
   const [y, m, d] = s.split('-').map(Number);
   return new Date(y, m - 1, d, 12, 0, 0);
 }
-function stepDay(delta) {
-  const d = parseDay(currentDay);
-  d.setDate(d.getDate() + delta);
-  setDay(dayStr(d));
+// pondělí týdne, do nějž spadá dnešek
+function mondayStr() {
+  const t = new Date();
+  const d = new Date(t.getFullYear(), t.getMonth(), t.getDate(), 12);
+  d.setDate(d.getDate() - (d.getDay() + 6) % 7);
+  return dayStr(d);
 }
+
+let currentDay = todayStr();  // režim Den
+let weekStart = null;         // režim Týden: pondělí kalendářního týdne, null = posledních 7 dní
+let monthStr = null;          // režim Měsíc: 'YYYY-MM', null = posledních 30 dní
+
+// kotva zobrazeného období pro API (bez kotvy = klouzavé okno)
+function anchorParam(range) {
+  if (range === 'day') return '&date=' + currentDay;
+  if (range === 'week' && weekStart) return '&start=' + weekStart;
+  if (range === 'month' && monthStr) return '&month=' + monthStr;
+  return '';
+}
+
+// Posun o období vpřed/vzad podle aktivního režimu. Výchozí stav Týdne/Měsíce
+// je klouzavé okno „posledních 7/30 dní"; krok zpět přepne na kalendářní
+// období (minulý týden/měsíc) a krok vpřed z posledního celého období se
+// vrátí na klouzavé okno. Aktuální (rozpracovaný) kalendářní týden/měsíc se
+// nezobrazuje – je stejně obsažený v klouzavém okně.
+function stepPeriod(delta) {
+  if (currentRange === 'day') {
+    const d = parseDay(currentDay);
+    d.setDate(d.getDate() + delta);
+    currentDay = dayStr(d);
+    if (currentDay > todayStr()) currentDay = todayStr();
+  } else if (currentRange === 'week') {
+    const d = parseDay(weekStart || mondayStr());
+    d.setDate(d.getDate() + 7 * delta);
+    weekStart = dayStr(d) >= mondayStr() ? null : dayStr(d);
+  } else if (currentRange === 'month') {
+    const cur = ymStr(new Date());
+    const [y, m] = (monthStr || cur).split('-').map(Number);
+    const next = ymStr(new Date(y, m - 1 + delta, 1, 12));
+    monthStr = next >= cur ? null : next;
+  } else return;
+  syncNav();
+  reloadRange();
+}
+
 function setDay(s) {
   if (s > todayStr()) s = todayStr();   // do budoucna nechodíme
   currentDay = s;
-  syncDayNav();
+  syncNav();
   loadSeries('day');
 }
-function syncDayNav() {
+
+function reloadRange() {
+  if (currentRange === 'week' || currentRange === 'month') loadDaily(currentRange);
+  loadSeries(currentRange);
+}
+
+// promítne stav navigace do UI: Den = datepicker, Týden/Měsíc = popisek období
+function syncNav() {
   const pick = document.getElementById('dayPick');
-  pick.value = currentDay;
-  pick.max = todayStr();
-  document.getElementById('dayNext').disabled = currentDay >= todayStr();
+  const lab = document.getElementById('periodLabel');
+  const next = document.getElementById('dayNext');
+  const isDay = currentRange === 'day';
+  pick.hidden = !isDay;
+  lab.hidden = isDay;
+  if (isDay) {
+    pick.value = currentDay;
+    pick.max = todayStr();
+    next.disabled = currentDay >= todayStr();
+  } else if (currentRange === 'week') {
+    if (weekStart) {
+      const a = parseDay(weekStart);
+      const b = parseDay(weekStart);
+      b.setDate(b.getDate() + 6);
+      lab.textContent = `${a.getDate()}. ${a.getMonth() + 1}. – ${b.getDate()}. ${b.getMonth() + 1}. ${b.getFullYear()}`;
+    } else {
+      lab.textContent = 'posledních 7 dní';
+    }
+    next.disabled = weekStart === null;
+  } else {
+    lab.textContent = monthStr
+      ? parseDay(monthStr + '-01').toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' })
+      : 'posledních 30 dní';
+    next.disabled = monthStr === null;
+  }
 }
 
 function makeOpts(series, extra = {}) {
@@ -204,8 +273,7 @@ function makeOpts(series, extra = {}) {
 }
 
 async function loadSeries(range) {
-  let url = '?api=series&range=' + range;
-  if (range === 'day') url += '&date=' + currentDay;
+  const url = '?api=series&range=' + range + anchorParam(range);
   let d;
   try {
     const r = await fetch(url, { cache: 'no-store' });
@@ -312,11 +380,12 @@ function balanceHtml(d) {
 async function loadDaily(range) {
   let d;
   try {
-    const r = await fetch('?api=daily&range=' + range, { cache: 'no-store' });
+    const r = await fetch('?api=daily&range=' + range + anchorParam(range), { cache: 'no-store' });
     d = await r.json();
   } catch (e) { return; }
   const el = document.getElementById('chartDaily');
-  if (!d.ok || !d.count) { el.innerHTML = '<p style="color:#8b949e">Žádná data pro toto období.</p>'; return; }
+  const empty = !d.ok || !d.count || d.production.every((v, i) => v == null && d.consumption[i] == null);
+  if (empty) { el.innerHTML = '<p style="color:#8b949e">Žádná data pro toto období.</p>'; return; }
 
   const max = Math.max(1, ...d.production.map((v) => v || 0), ...d.consumption.map((v) => v || 0));
   const fmt = (v) => (v == null ? '–' : v.toFixed(1).replace('.', ','));
@@ -341,11 +410,15 @@ function applyRange(range) {
   currentRange = range;
   const isDay = range === 'day';
   const isAgg = range === 'week' || range === 'month';
-  document.getElementById('daynav').hidden = !isDay;
+  document.getElementById('daynav').hidden = range === 'live';
   document.getElementById('balance').hidden = !isDay;
   document.getElementById('cardPower').hidden = isAgg;   // výkonový graf jen Živě/Den
   document.getElementById('cardDaily').hidden = !isAgg;  // sloupce jen Týden/Měsíc
-  if (isDay) { currentDay = todayStr(); syncDayNav(); }
+  // při přepnutí režimu vždy začni výchozím pohledem (dnešek / klouzavé okno)
+  if (isDay) currentDay = todayStr();
+  if (range === 'week') weekStart = null;
+  if (range === 'month') monthStr = null;
+  if (range !== 'live') syncNav();
   if (isAgg) loadDaily(range);
   loadSeries(range);   // graf baterie + soběstačnosti jede ve všech režimech
 }
@@ -358,8 +431,8 @@ document.querySelectorAll('.range button').forEach((b) => {
   });
 });
 
-document.getElementById('dayPrev').addEventListener('click', () => stepDay(-1));
-document.getElementById('dayNext').addEventListener('click', () => stepDay(1));
+document.getElementById('dayPrev').addEventListener('click', () => stepPeriod(-1));
+document.getElementById('dayNext').addEventListener('click', () => stepPeriod(1));
 document.getElementById('dayPick').addEventListener('change', (e) => {
   if (e.target.value) setDay(e.target.value);
 });

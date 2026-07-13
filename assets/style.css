@@ -154,6 +154,13 @@ main { padding: 1.2rem; max-width: 1700px; margin: 0 auto; }
 }
 .daynav button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .daynav button:disabled { opacity: .35; cursor: default; }
+.daynav .plabel {
+  min-width: 11rem;
+  text-align: center;
+  font-size: .95rem;
+  color: var(--text);
+}
+.daynav .plabel[hidden] { display: none; }
 .daynav input[type="date"] {
   background: var(--card);
   border: 1px solid var(--border);

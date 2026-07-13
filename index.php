@@ -222,6 +222,21 @@ function readCsv(string $file, bool $gz = false): array {
     return $rows;
 }
 
+// Validace kotev období (striktní formát = zároveň ochrana path-traversal,
+// protože z hodnot se skládají cesty k souborům). Vrací null, když parametr
+// chybí nebo je vadný – volající pak použije klouzavé okno posledních 7/30 dní.
+function weekParam(array $q): ?string {
+    if (isset($q['start']) && preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $q['start'], $m)
+        && checkdate((int)$m[2], (int)$m[3], (int)$m[1])) {
+        return $q['start'];
+    }
+    return null;
+}
+function monthParam(array $q): ?string {
+    return (isset($q['month']) && preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $q['month']))
+        ? $q['month'] : null;
+}
+
 function handleApi(array $q, string $logDir): array {
     $api = $q['api'];
 
@@ -258,15 +273,19 @@ function handleApi(array $q, string $logDir): array {
         if ($range === 'day' && $date !== null) {
             $from = strtotime($date . ' 00:00:00');
             $to   = min($now, $from + 86400 - 1);   // budoucí dny se ořežou na teď
+        } elseif ($range === 'week') {
+            // kalendářní týden od pondělí (?start=YYYY-MM-DD); bez kotvy posledních 7 dní
+            $start = weekParam($q);
+            $from  = $start !== null ? strtotime($start . ' 00:00:00') : $now - 7 * 86400;
+            $to    = $start !== null ? min($now, strtotime($start . ' +7 days') - 1) : $now;
+        } elseif ($range === 'month') {
+            // kalendářní měsíc (?month=YYYY-MM); bez kotvy posledních 30 dní
+            $month = monthParam($q);
+            $from  = $month !== null ? strtotime($month . '-01 00:00:00') : $now - 30 * 86400;
+            $to    = $month !== null ? min($now, strtotime($month . '-01 +1 month') - 1) : $now;
         } else {
-            switch ($range) {
-                case 'live':  $from = $now - 1800;       break; // 30 min
-                case 'day':   $from = strtotime('today'); break;
-                case 'week':  $from = $now - 7 * 86400;  break;
-                case 'month': $from = $now - 30 * 86400; break;
-                default:      $from = strtotime('today');
-            }
-            $to = $now;
+            $from = $range === 'live' ? $now - 1800 : strtotime('today');
+            $to   = $now;
         }
 
         // Týden/Měsíc: dnešek a včerejšek jsou ještě v 5s syrových logách,
@@ -298,19 +317,28 @@ function handleApi(array $q, string $logDir): array {
     }
 
     if ($api === 'daily') {
-        // Denní souhrny pro sloupcový přehled (Týden/Měsíc): jedna hodnota na den.
-        // Kumulativní „dnes…" čítače = poslední řádek dne.
+        // Denní souhrny pro sloupcový přehled: jedna hodnota na den za kalendářní
+        // týden (?start=YYYY-MM-DD, pondělí) nebo měsíc (?month=YYYY-MM);
+        // bez kotvy posledních 7/30 dní. Kumulativní čítače = poslední řádek dne.
         $range = $q['range'] ?? 'week';
-        $days  = $range === 'month' ? 30 : 7;
         $fi    = array_flip(FIELDS);
-        $now   = time();
-        $start = strtotime(date('Y-m-d', $now)) - ($days - 1) * 86400;
+        $today = date('Y-m-d');
+
+        if ($range === 'month') {
+            $month  = monthParam($q);
+            $startD = $month !== null ? $month . '-01' : date('Y-m-d', strtotime('today -29 days'));
+            $endD   = $month !== null ? date('Y-m-d', strtotime($startD . ' +1 month -1 day')) : $today;
+        } else {
+            $startD = weekParam($q) ?? date('Y-m-d', strtotime('today -6 days'));
+            $endD   = date('Y-m-d', strtotime($startD . ' +6 days'));
+        }
+        if ($endD > $today) $endD = $today;   // budoucí dny období se ořežou
 
         $ts = $prod = $cons = [];
-        for ($d = $start; $d <= $now; $d += 86400) {
-            $rows = dayRows($logDir, date('Y-m-d', $d));
+        for ($dd = $startD; $dd <= $endD; $dd = date('Y-m-d', strtotime($dd . ' +1 day'))) {
+            $rows = dayRows($logDir, $dd);
             $last = $rows ? end($rows) : null;
-            $ts[]   = $d;
+            $ts[]   = strtotime($dd);
             $prod[] = $last !== null && isset($last[$fi['totalProduction']])  ? $last[$fi['totalProduction']]  + 0 : null;
             $cons[] = $last !== null && isset($last[$fi['totalConsumption']]) ? $last[$fi['totalConsumption']] + 0 : null;
         }
@@ -434,14 +462,15 @@ function renderDashboard(): void {
       <button data-range="month">Měsíc</button>
     </div>
     <div class="daynav" id="daynav" hidden>
-      <button id="dayPrev" type="button" aria-label="Předchozí den">‹</button>
+      <button id="dayPrev" type="button" aria-label="Předchozí období">‹</button>
       <input type="date" id="dayPick" aria-label="Vybrat datum">
-      <button id="dayNext" type="button" aria-label="Další den">›</button>
+      <span class="plabel" id="periodLabel" hidden></span>
+      <button id="dayNext" type="button" aria-label="Další období">›</button>
     </div>
     <div class="balance" id="balance" hidden><!-- denní bilance doplní JS --></div>
     <div class="chart-card" id="cardPower"><h2>Výkon (W)</h2><div id="chartPower"></div></div>
-    <div class="chart-card" id="cardSoc"><h2>Baterie a soběstačnost (%)</h2><div id="chartSoc"></div></div>
     <div class="chart-card" id="cardDaily" hidden><h2>Denní přehled – výroba vs spotřeba (kWh)</h2><div id="chartDaily"></div></div>
+    <div class="chart-card" id="cardSoc"><h2>Baterie a soběstačnost (%)</h2><div id="chartSoc"></div></div>
   </section>
 </main>
 

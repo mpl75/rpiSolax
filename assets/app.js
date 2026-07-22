@@ -11,9 +11,12 @@ const F = {
 };
 
 // Režimy měniče (z reverzního inženýrství Solax JSONu)
+// Zkrácené, ať se badge vejde do hlavičky i v úzké kartě. Plné názvy ze
+// Solaxu: Waiting, Checking, Normal, Off, Permanent Fault, Updating,
+// EPS Check, EPS Mode, Self Test, Idle, Standby.
 const INVERTER_MODE = [
-  'Waiting', 'Checking', 'Normal', 'Off', 'Permanent Fault', 'Updating',
-  'EPS Check', 'EPS Mode', 'Self Test', 'Idle', 'Standby',
+  'Wait', 'Check', 'Norm', 'Off', 'Fault!', 'Update',
+  'EPS chk', 'EPS', 'Test', 'Idle', 'Stdby',
 ];
 
 // Meze pro ukazatele (bary) – ze solax.conf, předané PHP do window.LIMITS
@@ -31,6 +34,25 @@ const kWh = (v, d = 1) => (v == null ? { n: '–', u: '' } : { n: v.toFixed(d).r
 const pct = (v) => (v == null ? { n: '–', u: '' } : { n: String(Math.round(v)), u: '%' });
 const tempTxt = (v) => (v == null ? '–' : Math.round(v) + ' °C');
 const mode = (v) => (v == null || INVERTER_MODE[v] == null ? '–' : INVERTER_MODE[v]);
+
+// Ikony do hlaviček panelů. Inline SVG (viewBox 24×24, stroke: currentColor),
+// takže převezmou barvu textu hlavičky a fungují v obou tématech. Na širokém
+// displeji doprovází název, pod 640px (viz .htitle v CSS) zůstane jen ikona.
+// <title> dělá nájezdový tooltip; aria-hidden, ať čtečka nečte název dvakrát.
+const ICONS = {
+  // solární panel na stojanu
+  panely: '<rect x="3" y="4" width="18" height="12" rx="1"/><line x1="3" y1="8" x2="21" y2="8"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="9" y1="4" x2="9" y2="16"/><line x1="15" y1="4" x2="15" y2="16"/><line x1="12" y1="16" x2="12" y2="20"/><line x1="8" y1="20" x2="16" y2="20"/>',
+  // baterie s pólem
+  baterie: '<rect x="2" y="7" width="17" height="10" rx="2"/><line x1="22" y1="10.5" x2="22" y2="13.5"/><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="14" y1="12" x2="16" y2="12"/>',
+  // sinusovka v rámečku – převod DC→AC
+  stridac: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M6 13 q2 -5 4 0 t4 0 t4 0"/>',
+  // stožár vysokého vedení
+  sit: '<path d="M7 21 L12 3 L17 21"/><line x1="5" y1="21" x2="19" y2="21"/><line x1="8.5" y1="9" x2="15.5" y2="9"/><line x1="7.5" y1="13" x2="16.5" y2="13"/><line x1="9.5" y1="7" x2="12" y2="9"/><line x1="14.5" y1="7" x2="12" y2="9"/>',
+  // domeček s dveřmi
+  dum: '<path d="M4 11 L12 4 L20 11"/><path d="M6 10 V20 H18 V10"/><path d="M10 20 V15 H14 V20"/>',
+};
+const icon = (name, label) =>
+  `<svg class="hicon" viewBox="0 0 24 24" aria-hidden="true"><title>${label}</title>${ICONS[name]}</svg>`;
 
 // Odhad času do plna / do vybití (k rezervě L.batteryMinSoC). Vrací {label,n} nebo null.
 function batteryEta(s) {
@@ -66,54 +88,82 @@ async function refreshCurrent() {
   const ssr = s.totalConsumption >= SSR_MIN_KWH ? s.selfSufficiencyRate : null;
   document.getElementById('tiles').innerHTML = `
     <div class="group">
-      <h3>Panely</h3>
+      <h3>${icon('panely', 'Panely')}<span class="htitle">Panely</span></h3>
       ${gauge(s.totalPower, L.peak1 + L.peak2)}
-      <div class="metrics">
-        ${row('string 1', W(s.pv1Power), { bar: bar(s.pv1Power, L.peak1) })}
-        ${row('string 2', W(s.pv2Power), { bar: bar(s.pv2Power, L.peak2) })}
-        ${row('dnes výroba DC', kWh(s.totalProduction))}
+      <div class="pfoot">
+        <span></span>
+        <span>výroba DC <b>${kWh(s.totalProduction).n}</b> kWh</span>
       </div>
     </div>
     <div class="group">
-      <h3><span class="htitle">Baterie</span><span class="hmeta"><span class="htemp">${tempTxt(s.batteryTemp)}</span></span></h3>
+      <h3>${icon('baterie', 'Baterie')}<span class="htitle">Baterie</span><span class="hmeta"><span class="htemp">${tempTxt(s.batteryTemp)}</span></span></h3>
       ${gauge(s.batterySoC, 100, { val: pct(s.batterySoC), lim: ['0', '100 %'], cls: 'green', label: 'stav baterie' })}
-      <div class="metrics">
-        ${row(s.batteryPower >= 0 ? 'nabíjení' : 'vybíjení', W(s.batteryPower), { cls: s.batteryPower >= 0 ? 'pos' : 'neg' })}
-        ${eta ? row(eta.label, { n: eta.n, u: '' }) : ''}
-        ${row('dnes nabito', kWh(s.totalChargedIn))}
-        ${row('vybito', kWh(s.totalChargedOut))}
+      <div class="pfoot">
+        <span class="pcol">
+          <span>${s.batteryPower >= 0 ? 'nabíjení' : 'vybíjení'} <b class="${s.batteryPower >= 0 ? 'pos' : 'neg'}">${W(s.batteryPower).n}</b> W</span>
+          <span>${!eta ? '' : eta.label === 'baterie' ? 'klid' : `${eta.label} <b>${eta.n}</b>`}</span>
+        </span>
+        <span class="pcol right">
+          <span><span class="up" title="nabito">↑</span> <b>${kWh(s.totalChargedIn).n}</b> kWh</span>
+          <span><span class="dn" title="vybito">↓</span> <b>${kWh(s.totalChargedOut).n}</b> kWh</span>
+        </span>
       </div>
     </div>
     <div class="group">
-      <h3><span class="htitle">Střídač</span><span class="badge">${mode(s.inverterMode)}</span><span class="hmeta"><span class="htemp">${tempTxt(s.inverterTemp)}</span></span></h3>
+      <h3>${icon('stridac', 'Střídač')}<span class="htitle">Střídač</span><span class="badge">${mode(s.inverterMode)}</span><span class="hmeta"><span class="htemp">${tempTxt(s.inverterTemp)}</span></span></h3>
       <div class="metrics">
         ${row('výkon', W(s.inverterPower), { bar: bar(s.inverterPower, L.maxPower), hl: true })}
-        ${row('dnes výroba AC', kWh(s.totalProductionInclBatt))}
+      </div>
+      <div class="pfoot">
+        <span></span>
+        <span>výroba AC <b>${kWh(s.totalProductionInclBatt).n}</b> kWh</span>
       </div>
     </div>
     <div class="group">
-      <h3>Distribuční síť</h3>
+      <h3>${icon('sit', 'Distribuční síť')}<span class="htitle">Distribuční síť</span></h3>
       <div class="metrics">
-        ${row(s.feedInPower >= 0 ? 'dodávka' : 'odběr', W(s.feedInPower), { cls: s.feedInPower >= 0 ? 'pos' : 'neg' })}
-        ${row('dnes odebráno', kWh(s.totalGridIn, 2))}
-        ${row('dodáno', kWh(s.totalGridOut, 2))}
+        ${row(s.feedInPower >= 0 ? 'dodávka' : 'odběr', W(s.feedInPower), { cls: s.feedInPower >= 0 ? 'pos' : 'neg', barEl: barCenter(s.feedInPower, L.maxPower) })}
+      </div>
+      <div class="pfoot">
+        <span class="pcol"></span>
+        <span class="pcol right">
+          <span><span class="dn" title="odebráno">↓</span> <b>${kWh(s.totalGridIn, 2).n}</b> kWh</span>
+          <span><span class="up" title="dodáno">↑</span> <b>${kWh(s.totalGridOut, 2).n}</b> kWh</span>
+        </span>
       </div>
     </div>
     <div class="group">
-      <h3>Dům</h3>
+      <h3>${icon('dum', 'Dům')}<span class="htitle">Dům</span></h3>
       <div class="metrics">
-        ${row('aktuální odběr', W(s.load), { bar: bar(s.load, L.maxLoad), hl: true })}
-        ${row('dnes spotřeba', kWh(s.totalConsumption, 2))}
-        ${row('soběstačnost', pct(ssr), { bar: bar(ssr, 100) })}
+        ${row('odběr', W(s.load), { bar: bar(s.load, L.maxLoad), hl: true })}
+      </div>
+      <div class="pfoot">
+        <span class="pcol"></span>
+        <span class="pcol right">
+          <span>spotř. <b>${kWh(s.totalConsumption, 2).n}</b> kWh</span>
+          <span>soběst. <b>${pct(ssr).n}</b>${ssr == null ? '' : ' %'}</span>
+        </span>
       </div>
     </div>`;
 }
 
 const bar = (v, max) => Math.max(0, Math.min(100, ((v || 0) / max) * 100)).toFixed(0);
 
+// Bipolární bar s nulou uprostřed (Distribuční síť): kladná hodnota (dodávka) se
+// plní od středu doprava modře, záporná (odběr) od středu doleva červeně.
+// Max výchylka na každou stranu = půl šířky (|v|/max klampnuto na 50 %).
+function barCenter(v, max) {
+  const w = Math.min(50, Math.abs((v || 0) / max) * 100 / 2);
+  const s = (v || 0) >= 0
+    ? `left:50%;width:${w.toFixed(1)}%;background:var(--blue)`
+    : `left:${(50 - w).toFixed(1)}%;width:${w.toFixed(1)}%;background:var(--red)`;
+  return `<span class="ibar center"><i style="${s}"></i></span>`;
+}
+
 // „Budík": plněný oblouk 240° (otevřený dole, 150°→390° po směru ručiček),
 // uprostřed velká hodnota. Naplnění řeší pathLength=100 + stroke-dasharray,
-// takže dráha i výplň sdílejí stejnou cestu. Souřadnice: střed (60,58), viewBox 120×100.
+// takže dráha i výplň sdílejí stejnou cestu. Souřadnice: střed (60,58); viewBox
+// ořezaný na obsah (y 2–95), ať budík nemá prázdný pruh nahoře a dole.
 // o.val = formátovaná hodnota {n,u} (výchozí W), o.lim = [levý, pravý] popisek stupnice,
 // o.cls = barevná varianta (např. 'green'), o.label = popisek pro aria-label.
 function gauge(v, max, o = {}) {
@@ -130,7 +180,7 @@ function gauge(v, max, o = {}) {
     return `<line x1="${p.x}" y1="${p.y}" x2="${q.x}" y2="${q.y}"/>`;
   }).join('');
   const lim = o.lim || ['0', String(Math.round(max / 100) / 10).replace('.', ',') + ' kW'];
-  return `<svg class="gauge${o.cls ? ' ' + o.cls : ''}" viewBox="0 0 120 100" role="img" aria-label="${o.label || 'celkem'} ${val.n} ${val.u}">
+  return `<svg class="gauge${o.cls ? ' ' + o.cls : ''}" viewBox="0 2 120 93" role="img" aria-label="${o.label || 'celkem'} ${val.n} ${val.u}">
     <path class="gtrack" d="${arc}"/>
     ${frac > 0 ? `<path class="gfill" d="${arc}" pathLength="100" stroke-dasharray="${(frac * 100).toFixed(1)} 100"/>` : ''}
     <g class="gticks">${ticks}</g>
@@ -143,10 +193,12 @@ function gauge(v, max, o = {}) {
 
 // Čtyři buňky mřížky .metrics: popisek | číslo (vpravo) | jednotka (vlevo) | bar.
 // Sdílené sloupce v rámci panelu => čísla, jednotky i bary jsou přesně pod sebou.
-// val = { n, u }. o.hl = zvýraznit, o.cls = 'pos'/'neg', o.bar = % naplnění baru.
+// val = { n, u }. o.hl = zvýraznit, o.cls = 'pos'/'neg', o.bar = % naplnění baru,
+// o.barEl = hotový HTML baru (např. bipolární z barCenter).
 function row(label, val, o = {}) {
   const cls = o.cls ? ' ' + o.cls : (o.hl ? ' hl' : '');
-  const b = o.bar == null ? '<span></span>' : `<span class="ibar"><i style="width:${o.bar}%"></i></span>`;
+  const b = o.barEl != null ? o.barEl
+    : o.bar == null ? '<span></span>' : `<span class="ibar"><i style="width:${o.bar}%"></i></span>`;
   return `<span class="label">${label}</span><span class="num${cls}">${val.n}</span><span class="unit">${val.u}</span>${b}`;
 }
 

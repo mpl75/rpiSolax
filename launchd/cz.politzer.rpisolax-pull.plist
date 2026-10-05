@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent: 1×/den stáhne logs/ z Raspberry Pi (pull-from-rpi.sh).
+  Instalace viz README.md (sekce „Pulling data to the Mac").
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>cz.politzer.rpisolax-pull</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/michalpolitzer/rpiSolax/pull-from-rpi.sh</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>86400</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/michalpolitzer/rpiSolax/logs-from-pi/_launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/michalpolitzer/rpiSolax/logs-from-pi/_launchd.log</string>
+</dict>
+</plist>

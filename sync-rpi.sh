@@ -17,6 +17,8 @@
 #   .git/ .claude/   metadata repa / editor
 #   .DS_Store .nova  smetí macOS/editoru
 #   sync-rpi.sh      tenhle skript (na Pi nemá co dělat)
+#   pull-from-rpi.sh, launchd/   protisměr Pi -> Mac (běží jen na Macu)
+#   logs-from-pi/    data stažená z Pi – nikdy je nenahrávat zpátky
 #
 # Služby se ZÁMĚRNĚ nerestartují. Když se změní solax.sh nebo systemd unita,
 # je potřeba je restartovat ručně (po domluvě): sudo systemctl restart solax-logger
@@ -24,7 +26,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REMOTE="michal@raspberrypi.local:/var/www/html/rpiSolax/"
+HOST="rpi"                                   # alias z ~/.ssh/config
+REMOTE="$HOST:/var/www/html/rpiSolax/"
 
 DRY=""
 if [ "${1:-}" = "-n" ] || [ "${1:-}" = "--dry-run" ]; then
@@ -37,8 +40,8 @@ fi
 chmod 640 "$SCRIPT_DIR/config.json" "$SCRIPT_DIR/solax.conf" 2>/dev/null || true
 
 # Vzdálený rsync běží jako www-data => zapsané soubory rovnou patří www-data
-# (žádný následný chown není potřeba). Lokální rsync na macOS je starý (2.6.9),
-# proto se nepoužívá --chown (to umí až rsync 3.1+).
+# (žádný následný chown není potřeba). Lokální rsync na macOS je openrsync
+# (protokol 29), proto se nepoužívá --chown.
 rsync -avh --delete $DRY \
   --exclude='.git/' \
   --exclude='.claude/' \
@@ -48,6 +51,9 @@ rsync -avh --delete $DRY \
   --exclude='*.csv' \
   --exclude='*.csv.gz' \
   --exclude='/sync-rpi.sh' \
+  --exclude='/pull-from-rpi.sh' \
+  --exclude='/launchd/' \
+  --exclude='/logs-from-pi/' \
   --rsync-path='sudo -u www-data rsync' \
   "$SCRIPT_DIR/" "$REMOTE"
 

@@ -10,5 +10,8 @@ logs/
 *.csv
 *.csv.gz
 
+# Data stažená z Pi na Mac (pull-from-rpi.sh)
+logs-from-pi/
+
 # macOS
 .DS_Store

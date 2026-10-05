@@ -16,6 +16,7 @@ Reads real-time data straight from the inverter's local API
 | `systemd/` | Units to run the logger and the daily aggregation on the Pi. |
 | `deploy/` | Raspberry Pi / Apache setup guide + vhost snippet. |
 | `sync-rpi.sh` | One-way mirror of this folder to the Pi (deploy). |
+| `pull-from-rpi.sh` + `launchd/` | Daily pull of the Pi's `logs/` into `logs-from-pi/` on the Mac (archive for analysis). |
 
 ## Configuration
 
@@ -56,6 +57,42 @@ runs on the Pi, so deployment is a plain mirror:
 
 `sync-rpi.sh` never touches the server's `logs/` (live data) and keeps the real
 `config.json` / `solax.conf` in sync (they stay out of git).
+
+## Pulling data to the Mac
+
+`pull-from-rpi.sh` copies the Pi's `logs/` into `./logs-from-pi/` (gitignored,
+never synced back). It is incremental and never deletes anything that came from
+the Pi — the only local cleanup is `raw/D.csv` once `raw/D.csv.gz` exists (the
+Pi's aggregation gzips each finished raw day, so the `.csv` is just an
+incomplete older copy). The full ~5 s resolution survives on the Pi as
+`raw/*.csv.gz`, so pulling once a day loses nothing. The host is the `rpi`
+alias from `~/.ssh/config` (key auth, no passwords in the script).
+
+```bash
+./pull-from-rpi.sh -n        # dry run
+./pull-from-rpi.sh           # pull now; one line per run in logs-from-pi/_pull.log
+```
+
+Install the daily launchd agent (the first run, triggered on load, pulls the
+whole history):
+
+```bash
+mkdir -p logs-from-pi
+cp launchd/cz.politzer.rpisolax-pull.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/cz.politzer.rpisolax-pull.plist
+```
+
+Check it is running:
+
+```bash
+launchctl print gui/$(id -u)/cz.politzer.rpisolax-pull | grep -E 'state|runs|last exit'
+tail logs-from-pi/_pull.log
+```
+
+If the Mac is asleep when a run is due, launchd runs it once after wake-up
+(missed runs are coalesced, not queued). If the Pi is unreachable the run
+exits with code 2 and logs `FAIL`; the next run catches up. To remove:
+`launchctl bootout gui/$(id -u)/cz.politzer.rpisolax-pull`.
 
 ## Credits
 

@@ -20,8 +20,7 @@ const INVERTER_MODE = [
 ];
 
 // Meze pro ukazatele (bary) – ze solax.conf, předané PHP do window.LIMITS
-const L = window.LIMITS || { peak1: 5000, peak2: 5000, maxPower: 10000, maxLoad: 16000, batteryMinSoC: 15 };
-if (L.batteryMinSoC == null) L.batteryMinSoC = 15;
+const L = window.LIMITS;
 
 // Soběstačnost = podíl dnešní spotřeby pokrytý vlastními zdroji. Dokud je denní
 // spotřeba maličká (těsně po půlnoci), je to jen šum – pod tímhle prahem se skryje.

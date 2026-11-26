@@ -11,7 +11,8 @@
 # Na Pi solax-aggregate.sh po dni udělá z raw/D.csv agg/D.csv (10 min)
 # a syrový soubor zabalí na raw/D.csv.gz (5 s rozlišení zůstává). Lokálně by
 # tak vedle sebe zůstal starý neúplný raw/D.csv a kompletní raw/D.csv.gz –
-# skript proto po stažení smaže raw/D.csv, k němuž už existuje raw/D.csv.gz.
+# skript proto po stažení smaže raw/D.csv, k němuž už existuje raw/D.csv.gz
+# (totéž pro logy wallboxu v evse/raw/).
 #
 # Každý běh zapíše jeden řádek do logs-from-pi/_pull.log.
 # Když je Pi nedostupné, skončí tiše s kódem 2 a nic nemaže.
@@ -58,13 +59,14 @@ if [ $rc -ne 0 ]; then
 fi
 
 # Úklid: syrový den už existuje jako .gz -> neúplný .csv je zbytečný.
+# Platí pro logy střídače (raw/) i wallboxu (evse/raw/).
 removed=0
-for gz in "$DEST"/raw/*.csv.gz; do
+for gz in "$DEST"/raw/*.csv.gz "$DEST"/evse/raw/*.csv.gz; do
   [ -e "$gz" ] || continue
   csv="${gz%.gz}"
   [ -e "$csv" ] || continue
   if [ -n "$DRY" ]; then
-    echo "smazal bych: raw/$(basename "$csv")"
+    echo "smazal bych: ${csv#"$DEST"/}"
   else
     rm -f "$csv"
   fi

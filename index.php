@@ -249,15 +249,24 @@ function evseCurrent(string $logDir): ?array {
     return null;
 }
 
+/** CSV wallboxu pro den: 10min agregát, když už existuje, jinak syrový 5s log. */
+function evseDayFile(string $logDir, string $date): string {
+    $agg = "$logDir/evse/agg/$date.csv";
+    return is_file($agg) ? $agg : "$logDir/evse/raw/$date.csv";
+}
+
 /** Kolik kWh šlo do auta za den: rozdíl celkového čítače wallboxu mezi
- *  prvním a posledním vzorkem dne. null, když ten den wallbox nelogoval. */
+ *  posledním vzorkem dne a posledním vzorkem předchozího dne (přesná hranice
+ *  půlnoci i u agregátu, jehož první řádek je až konec prvního 10min okna).
+ *  Bez předchozího dne se vezme první vzorek dne. null, když den nemá data. */
 function evseDayEnergy(string $logDir, string $date): ?float {
-    $file  = "$logDir/evse/raw/$date.csv";
-    $first = firstRow($file);
-    $last  = $first !== null ? lastRow($file) : null;
-    $i     = array_search('totalEnergy', EVSE_FIELDS, true);
-    if ($last === null || !isset($first[$i], $last[$i])) return null;
-    return round(max(0, $last[$i] - $first[$i]), 1);
+    $last = lastRow(evseDayFile($logDir, $date));
+    if ($last === null) return null;
+    $base = lastRow(evseDayFile($logDir, date('Y-m-d', strtotime($date . ' -1 day'))))
+        ?? firstRow(evseDayFile($logDir, $date));
+    $i = array_search('totalEnergy', EVSE_FIELDS, true);
+    if ($base === null || !isset($base[$i], $last[$i])) return null;
+    return round(max(0, $last[$i] - $base[$i]), 1);
 }
 
 /** Výkon wallboxu přiřazený k časům vzorků střídače (sdílená osa grafu).
@@ -266,7 +275,8 @@ function evseDayEnergy(string $logDir, string $date): ?float {
 function evsePowerSeries(string $logDir, array $ts, int $from, int $to, bool $tail): ?array {
     $ev = [];
     for ($d = strtotime(date('Y-m-d', $from)); $d <= $to; $d += 86400) {
-        $f = "$logDir/evse/raw/" . date('Y-m-d', $d) . '.csv';
+        // Živě čte syrový log od konce; historie preferuje 10min agregát
+        $f = $tail ? "$logDir/evse/raw/" . date('Y-m-d', $d) . '.csv' : evseDayFile($logDir, date('Y-m-d', $d));
         if (!is_file($f)) continue;
         foreach ($tail ? tailRows($f, $from - 30) : readCsv($f) as $r) {
             if (isset($r[1])) $ev[] = [(int)$r[0], (int)$r[1]];

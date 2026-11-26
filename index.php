@@ -4,8 +4,24 @@
 // JSON API nad CSV logy a vykreslení dashboardu.
 
 declare(strict_types=1);
-session_start();
 require_once __DIR__ . '/lib.php';   // tailRows, lastRow (sdílené s CLI skripty)
+
+$secure = !empty($_SERVER['HTTPS']); // lokálně po HTTP funguje taky
+
+// Bezpečnostní hlavičky (dashboard nesmí jít vložit do cizí stránky – clickjacking)
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+
+// Vlastní session – rpiGallery běží na stejném hostu (gallery_sess); se
+// sdíleným PHPSESSID by přihlášení do jedné aplikace platilo i v druhé.
+// Cookie jen pro HTTP (ne JS), Secure při HTTPS, strict mode proti podvržené session.
+session_name('solax_sess');
+ini_set('session.use_strict_mode', '1');
+ini_set('session.cookie_httponly', '1');
+ini_set('session.cookie_samesite', 'Lax');
+ini_set('session.cookie_secure', $secure ? '1' : '0');
+session_start();
 
 // ---------- Konfigurace ----------
 $config = json_decode(@file_get_contents(__DIR__ . '/config.json'), true);
@@ -16,7 +32,6 @@ if (!is_array($config)) {
 $LOG_DIR = $config['logDir'] ?? '/var/www/html/rpiSolax/logs';
 
 $_SESSION['csrf'] ??= bin2hex(random_bytes(32));
-$secure = !empty($_SERVER['HTTPS']); // lokálně po HTTP funguje taky
 
 // Pořadí sloupců v CSV (musí sedět se solax.sh a solax-aggregate.sh).
 // Definováno nahoře, protože top-level `const` se v PHP nehoistuje.
@@ -86,7 +101,7 @@ if (isset($_GET['logout'])) {
 // ---------- Přihlášení ----------
 $loginError = false;
 if (isset($_POST['login_user'], $_POST['login_pass'])) {
-    if (($_POST['csrf'] ?? '') !== $_SESSION['csrf']) {
+    if (!hash_equals($_SESSION['csrf'], (string)($_POST['csrf'] ?? ''))) {
         $loginError = true;
     } else {
         $ipHash   = hash('sha256', $_SERVER['REMOTE_ADDR'] ?? '');

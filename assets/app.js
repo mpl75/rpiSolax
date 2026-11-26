@@ -526,12 +526,27 @@ async function loadDaily(range) {
   const balEl = document.getElementById('balance');
   const empty = !d.ok || !d.count || d.production.every((v, i) => v == null && d.consumption[i] == null);
   if (empty) {
+    lastDaily = null;
     el.innerHTML = '<p style="color:#8b949e">Žádná data pro toto období.</p>';
     if (range === currentRange) balEl.hidden = true;
     return;
   }
   // souhrnné dlaždice za období (jen když je uživatel pořád v tomhle režimu)
   if (range === currentRange) { balEl.innerHTML = periodBalanceHtml(d); balEl.hidden = false; }
+  lastDaily = d;
+  renderDaily(d);
+}
+
+// poslední data sloupcového přehledu – při změně šířky okna se překreslí
+// (hustota popisků dnů závisí na šířce)
+let lastDaily = null;
+const DAY_LABEL_PX = 42;   // šířka popisku „28.10." i s mezerou
+
+function renderDaily(d) {
+  const el = document.getElementById('chartDaily');
+  // každý n-tý popisek dne, ať se na úzkém displeji nesléva; tooltip má každý sloupec
+  const slot = el.clientWidth / d.ts.length;
+  const step = slot > 0 ? ([1, 2, 3, 5, 7].find((s) => slot * s >= DAY_LABEL_PX) || 7) : 1;
 
   // Auto je ČÁST spotřeby – vykreslí se jako fialový spodek modrého sloupce
   // (výška celého sloupce = celá spotřeba). Jen když ho v období nějaký den má.
@@ -549,7 +564,7 @@ async function loadDaily(range) {
     return `<div class="day"><div class="bars">` +
       `<i class="prod" style="height:${h(p)}%" title="${lbl} výroba ${fmt(p)} kWh"></i>` +
       `<i class="cons" style="height:${h(c)}%" title="${tip}">${seg}</i>` +
-      `</div><span class="dlabel">${lbl}</span></div>`;
+      `</div><span class="dlabel">${i % step === 0 ? lbl : '&nbsp;'}</span></div>`;
   }).join('');
   el.innerHTML =
     `<div class="daily-legend"><span><i style="background:var(--accent)"></i>Výroba</span>` +
@@ -594,6 +609,7 @@ document.getElementById('dayPick').addEventListener('change', (e) => {
 window.addEventListener('resize', () => {
   const w = document.querySelector('main').clientWidth - 32;
   Object.values(charts).forEach((c) => c && c.setSize({ width: w, height: 260 }));
+  if (lastDaily && !document.getElementById('cardDaily').hidden) renderDaily(lastDaily);
 });
 
 // ---------- smyčky ----------

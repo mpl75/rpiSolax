@@ -13,3 +13,8 @@ batteryMinSoC=15
 log=0
 # Kam ukládat logy (výchozí: <složka skriptu>/logs). Na Pi typicky:
 #logdir=/var/www/html/rpiSolax/logs
+
+# --- Wallbox Solax X3-HAC (evse.php, Modbus TCP port 502, jen čtení) ---
+# IP wallboxu (pevná rezervace v DHCP) a Modbus unit ID (HAC: 1)
+evseHost=192.168.1.101
+evseUnit=1

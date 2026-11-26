@@ -27,6 +27,13 @@ const FIELDS = [
     'selfSufficiencyRate', 'inverterMode', 'batteryMode',
 ];
 
+// Sloupce CSV wallboxu (logs/evse/raw/) – musí sedět s EVSE_HEADER v evse.php.
+const EVSE_FIELDS = [
+    'timestamp', 'power', 'powerL1', 'powerL2', 'powerL3', 'currentL1', 'currentL2',
+    'currentL3', 'voltageL1', 'voltageL2', 'voltageL3', 'state', 'sessionEnergy',
+    'sessionStart', 'sessionDuration', 'totalEnergy', 'temp', 'maxCurrent',
+];
+
 // ---------- Auth tokeny (HMAC, podepsaná "zapamatuj si mě" cookie) ----------
 const TOKEN_TTL = 90 * 86400; // platnost tokenu (90 dní)
 
@@ -207,6 +214,75 @@ function lastRow(string $file): ?array {
     return null;
 }
 
+/** První datový řádek CSV (za hlavičkou), null když není. */
+function firstRow(string $file): ?array {
+    $fh = @fopen($file, 'rb');
+    if (!$fh) return null;
+    fgets($fh);                      // hlavička
+    $line = fgets($fh);
+    fclose($fh);
+    return ($line !== false && (int)$line > 0) ? explode(',', trim($line)) : null;
+}
+
+/** Řádek CSV -> asociativní pole čísel + stáří vzorku v sekundách. */
+function rowToObj(array $fields, array $row): array {
+    $obj = [];
+    foreach ($fields as $i => $name) {
+        $obj[$name] = isset($row[$i]) ? $row[$i] + 0 : null;
+    }
+    $obj['age'] = time() - (int)$obj['timestamp'];
+    return $obj;
+}
+
+/** Poslední vzorek wallboxu + kolik kWh šlo do auta dnes (rozdíl celkového
+ *  čítače proti prvnímu dnešnímu vzorku). null, když wallbox nic nezalogoval. */
+function evseCurrent(string $logDir): ?array {
+    $today = date('Y-m-d');
+    foreach ([$today, date('Y-m-d', time() - 86400)] as $d) {
+        $file = "$logDir/evse/raw/$d.csv";
+        $last = lastRow($file);
+        if ($last === null) continue;
+        $obj = rowToObj(EVSE_FIELDS, $last);
+        $obj['todayEnergy'] = $d === $today ? (evseDayEnergy($logDir, $d) ?? 0.0) : 0.0;
+        return $obj;
+    }
+    return null;
+}
+
+/** Kolik kWh šlo do auta za den: rozdíl celkového čítače wallboxu mezi
+ *  prvním a posledním vzorkem dne. null, když ten den wallbox nelogoval. */
+function evseDayEnergy(string $logDir, string $date): ?float {
+    $file  = "$logDir/evse/raw/$date.csv";
+    $first = firstRow($file);
+    $last  = $first !== null ? lastRow($file) : null;
+    $i     = array_search('totalEnergy', EVSE_FIELDS, true);
+    if ($last === null || !isset($first[$i], $last[$i])) return null;
+    return round(max(0, $last[$i] - $first[$i]), 1);
+}
+
+/** Výkon wallboxu přiřazený k časům vzorků střídače (sdílená osa grafu).
+ *  Ke každému času vezme nejbližší předchozí vzorek wallboxu, nejvýš 30 s
+ *  vzdálený; jinak null (mezera v křivce). null, když wallbox nic nemá. */
+function evsePowerSeries(string $logDir, array $ts, int $from, int $to, bool $tail): ?array {
+    $ev = [];
+    for ($d = strtotime(date('Y-m-d', $from)); $d <= $to; $d += 86400) {
+        $f = "$logDir/evse/raw/" . date('Y-m-d', $d) . '.csv';
+        if (!is_file($f)) continue;
+        foreach ($tail ? tailRows($f, $from - 30) : readCsv($f) as $r) {
+            if (isset($r[1])) $ev[] = [(int)$r[0], (int)$r[1]];
+        }
+    }
+    if (!$ev) return null;
+    $out = [];
+    $j = 0;
+    $n = count($ev);
+    foreach ($ts as $t) {
+        while ($j + 1 < $n && $ev[$j + 1][0] <= $t) $j++;
+        $out[] = abs($t - $ev[$j][0]) <= 30 ? $ev[$j][1] : null;
+    }
+    return $out;
+}
+
 function readCsv(string $file, bool $gz = false): array {
     $rows = [];
     $fh   = $gz ? gzopen($file, 'rb') : fopen($file, 'rb');
@@ -243,18 +319,15 @@ function handleApi(array $q, string $logDir): array {
     if ($api === 'current') {
         // poslední vzorek z dnešního (popř. včerejšího) syrového logu;
         // čte se jen konec souboru, ne celý den
+        $sample = null;
         foreach ([date('Y-m-d'), date('Y-m-d', time() - 86400)] as $d) {
             $last = lastRow("$logDir/raw/$d.csv");
             if ($last !== null) {
-                $obj = [];
-                foreach (FIELDS as $i => $name) {
-                    $obj[$name] = isset($last[$i]) ? $last[$i] + 0 : null;
-                }
-                $obj['age'] = time() - (int)$obj['timestamp'];
-                return ['ok' => true, 'sample' => $obj];
+                $sample = rowToObj(FIELDS, $last);
+                break;
             }
         }
-        return ['ok' => true, 'sample' => null];
+        return ['ok' => true, 'sample' => $sample, 'evse' => evseCurrent($logDir)];
     }
 
     if ($api === 'series') {
@@ -313,7 +386,16 @@ function handleApi(array $q, string $logDir): array {
                 }
             }
         }
-        return ['ok' => true, 'fields' => FIELDS, 'data' => $cols, 'count' => count($cols[0])];
+        $out = ['ok' => true, 'fields' => FIELDS, 'data' => $cols, 'count' => count($cols[0])];
+        // Wallbox: křivka výkonu jen pro Živě/Den (Týden/Měsíc výkonový graf nemá),
+        // energie do auta za den pro denní bilanci
+        if (!$step) {
+            $out['evsePower'] = evsePowerSeries($logDir, $cols[0], $from, $to, $range === 'live');
+        }
+        if ($range === 'day') {
+            $out['evseEnergy'] = evseDayEnergy($logDir, date('Y-m-d', $from));
+        }
+        return $out;
     }
 
     if ($api === 'daily') {
@@ -334,15 +416,24 @@ function handleApi(array $q, string $logDir): array {
         }
         if ($endD > $today) $endD = $today;   // budoucí dny období se ořežou
 
-        $ts = $prod = $cons = [];
+        // denní čítače střídače (kWh od půlnoci) – konečná hodnota dne; sloupce
+        // kreslí výrobu a spotřebu, souhrnné dlaždice období sčítají všechny
+        $counters = ['totalProduction', 'totalProductionInclBatt', 'totalConsumption',
+                     'totalGridIn', 'totalGridOut', 'totalChargedIn', 'totalChargedOut'];
+        $ts = $evse = [];
+        $days = array_fill_keys($counters, []);
         for ($dd = $startD; $dd <= $endD; $dd = date('Y-m-d', strtotime($dd . ' +1 day'))) {
             $rows = dayRows($logDir, $dd);
             $last = $rows ? end($rows) : null;
-            $ts[]   = strtotime($dd);
-            $prod[] = $last !== null && isset($last[$fi['totalProduction']])  ? $last[$fi['totalProduction']]  + 0 : null;
-            $cons[] = $last !== null && isset($last[$fi['totalConsumption']]) ? $last[$fi['totalConsumption']] + 0 : null;
+            $ts[] = strtotime($dd);
+            foreach ($counters as $c) {
+                $days[$c][] = $last !== null && isset($last[$fi[$c]]) ? $last[$fi[$c]] + 0 : null;
+            }
+            $evse[] = evseDayEnergy($logDir, $dd);   // čte jen první a poslední řádek
         }
-        return ['ok' => true, 'ts' => $ts, 'production' => $prod, 'consumption' => $cons, 'count' => count($ts)];
+        return ['ok' => true, 'ts' => $ts, 'production' => $days['totalProduction'],
+                'consumption' => $days['totalConsumption'], 'days' => $days,
+                'evse' => $evse, 'count' => count($ts)];
     }
 
     return ['ok' => false, 'error' => 'unknown api'];

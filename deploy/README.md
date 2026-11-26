@@ -16,7 +16,8 @@ config.sample.json    # VZOR configu webu (v gitu); reálný config.json je giti
 solax.conf.sample     # VZOR configu skriptu (v gitu); reálný solax.conf je gitignored
 solax.sh              # logger (5s smyčka, TUI + volitelně log do CSV)
 solax-aggregate.sh    # denní agregace raw 5s -> 10min
-systemd/              # 3 unit soubory
+evse.php              # logger wallboxu Solax HAC (Modbus TCP, 5s -> logs/evse/raw/)
+systemd/              # 4 unit soubory
 deploy/               # tento návod + Apache snippet
 .htaccess             # zákaz přímého přístupu k .json/.csv/.conf/.sh
 ```
@@ -72,6 +73,15 @@ sudo systemctl enable --now solax-logger.service
 sudo systemctl enable --now solax-aggregate.timer
 journalctl -u solax-logger -n 20 --no-pager
 ls /var/www/html/rpiSolax/logs/raw/   # měl by přibýt dnešní .csv
+```
+
+Volitelně logger wallboxu (potřebuje `evseHost` v `solax.conf` a `php-cli`):
+```bash
+sudo cp /var/www/html/rpiSolax/systemd/solax-evse.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now solax-evse.service
+journalctl -u solax-evse -n 20 --no-pager
+ls /var/www/html/rpiSolax/logs/evse/raw/   # dnešní .csv wallboxu
 ```
 
 ## 4. Apache

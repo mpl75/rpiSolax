@@ -1,0 +1,18 @@
+[Unit]
+Description=Solax wallbox logger (Modbus TCP, vzorkování 5 s -> CSV)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/html/rpiSolax
+ExecStart=/usr/bin/php /var/www/html/rpiSolax/evse.php
+Restart=always
+RestartSec=10
+# Adresa wallboxu (evseHost/evseUnit) i log/logdir se čtou ze solax.conf.
+# Výpadek spojení s wallboxem službu neshodí – jen se jednou zapíše do journalu
+# a logger zkouší dál.
+
+[Install]
+WantedBy=multi-user.target

@@ -289,12 +289,16 @@ function mondayStr() {
 let currentDay = todayStr();  // režim Den
 let weekStart = null;         // režim Týden: pondělí kalendářního týdne, null = posledních 7 dní
 let monthStr = null;          // režim Měsíc: 'YYYY-MM', null = posledních 30 dní
+let yearStr = null;           // režim Rok: 'YYYY', null = posledních 12 měsíců
+
+const isAggRange = (r) => r === 'week' || r === 'month' || r === 'year';
 
 // kotva zobrazeného období pro API (bez kotvy = klouzavé okno)
 function anchorParam(range) {
   if (range === 'day') return '&date=' + currentDay;
   if (range === 'week' && weekStart) return '&start=' + weekStart;
   if (range === 'month' && monthStr) return '&month=' + monthStr;
+  if (range === 'year' && yearStr) return '&year=' + yearStr;
   return '';
 }
 
@@ -318,6 +322,13 @@ function stepPeriod(delta) {
     const [y, m] = (monthStr || cur).split('-').map(Number);
     const next = ymStr(new Date(y, m - 1 + delta, 1, 12));
     monthStr = next >= cur ? null : next;
+  } else if (currentRange === 'year') {
+    // Rok: na rozdíl od Týdne/Měsíce se ukazuje i rozpracovaný kalendářní rok
+    // (data jsou teprve od léta 2026). Okno ‹ → letošek ‹ → loni…; › z letoška → okno.
+    const cur = new Date().getFullYear();
+    if (yearStr === null && delta > 0) return;
+    const y = (yearStr === null ? cur + 1 : +yearStr) + delta;
+    yearStr = y > cur ? null : String(y);
   } else return;
   syncNav();
   reloadRange();
@@ -331,8 +342,8 @@ function setDay(s) {
 }
 
 function reloadRange() {
-  if (currentRange === 'week' || currentRange === 'month') loadDaily(currentRange);
-  loadSeries(currentRange);
+  if (isAggRange(currentRange)) loadDaily(currentRange);
+  if (currentRange !== 'year') loadSeries(currentRange);   // Rok nemá graf baterie
 }
 
 // promítne stav navigace do UI: Den = datepicker, Týden/Měsíc = popisek období
@@ -357,6 +368,9 @@ function syncNav() {
       lab.textContent = 'posledních 7 dní';
     }
     next.disabled = weekStart === null;
+  } else if (currentRange === 'year') {
+    lab.textContent = yearStr ? `rok ${yearStr}` : 'posledních 12 měsíců';
+    next.disabled = yearStr === null;
   } else {
     lab.textContent = monthStr
       ? parseDay(monthStr + '-01').toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' })
@@ -486,12 +500,16 @@ function dayBalanceHtml(d) {
 function periodBalanceHtml(d) {
   const v = {};
   BAL_COUNTERS.forEach((c) => { v[c] = sumVals(d.days[c] || []); });
-  const cons = v.totalConsumption;
-  v.ssr = cons >= SSR_MIN_KWH && v.totalProductionInclBatt != null
-    ? Math.max(0, Math.min(100, (v.totalProductionInclBatt - (v.totalGridOut || 0)) / cons * 100))
-    : null;
+  v.ssr = ssrOf(v.totalProductionInclBatt, v.totalGridOut, v.totalConsumption);
   v.evse = sumVals(d.evse || []);
   return balanceHtml(v);
+}
+
+// soběstačnost ze součtů kWh: (výroba AC − do sítě) / spotřeba; null pro malou spotřebu
+function ssrOf(prodAC, gridOut, cons) {
+  return cons >= SSR_MIN_KWH && prodAC != null
+    ? Math.max(0, Math.min(100, (prodAC - (gridOut || 0)) / cons * 100))
+    : null;
 }
 
 const BAL_COUNTERS = ['totalProduction', 'totalProductionInclBatt', 'totalConsumption',
@@ -519,7 +537,9 @@ function balanceHtml(v) {
 async function loadDaily(range) {
   let d;
   try {
-    const r = await fetch('?api=daily&range=' + range + anchorParam(range), { cache: 'no-store' });
+    // Rok = měsíční souhrny (stejný tvar odpovědi jako denní, jen d.unit = 'month')
+    const api = range === 'year' ? '?api=monthly' : '?api=daily&range=' + range;
+    const r = await fetch(api + anchorParam(range), { cache: 'no-store' });
     d = await r.json();
   } catch (e) { return; }
   const el = document.getElementById('chartDaily');
@@ -541,12 +561,16 @@ async function loadDaily(range) {
 // (hustota popisků dnů závisí na šířce)
 let lastDaily = null;
 const DAY_LABEL_PX = 42;   // šířka popisku „28.10." i s mezerou
+const MONTH_LABEL_PX = 28; // „čvc" / „97 %" i s mezerou
+const MONTH_SHORT = ['led', 'úno', 'bře', 'dub', 'kvě', 'čvn', 'čvc', 'srp', 'zář', 'říj', 'lis', 'pro'];
 
 function renderDaily(d) {
   const el = document.getElementById('chartDaily');
-  // každý n-tý popisek dne, ať se na úzkém displeji nesléva; tooltip má každý sloupec
+  const isMonth = d.unit === 'month';
+  // každý n-tý popisek, ať se na úzkém displeji nesléva; tooltip má každý sloupec
   const slot = el.clientWidth / d.ts.length;
-  const step = slot > 0 ? ([1, 2, 3, 5, 7].find((s) => slot * s >= DAY_LABEL_PX) || 7) : 1;
+  const need = isMonth ? MONTH_LABEL_PX : DAY_LABEL_PX;
+  const step = slot > 0 ? ([1, 2, 3, 5, 7].find((s) => slot * s >= need) || 7) : 1;
 
   // Auto je ČÁST spotřeby – vykreslí se jako fialový spodek modrého sloupce
   // (výška celého sloupce = celá spotřeba). Jen když ho v období nějaký den má.
@@ -556,15 +580,21 @@ function renderDaily(d) {
   const h = (v) => ((v || 0) / max * 100).toFixed(1);
   const bars = d.ts.map((t, i) => {
     const dt = new Date(t * 1000);
-    const lbl = `${dt.getDate()}.${dt.getMonth() + 1}.`;
     const p = d.production[i], c = d.consumption[i];
     const e = ev && ev[i] > 0 && c > 0 ? Math.min(ev[i], c) : null;
+    // Rok: zkratka měsíce + jeho soběstačnost pod ní; tooltip s celým názvem měsíce
+    const ssr = isMonth ? ssrOf(d.days.totalProductionInclBatt[i], d.days.totalGridOut[i], c) : null;
+    const lbl = isMonth ? MONTH_SHORT[dt.getMonth()] : `${dt.getDate()}.${dt.getMonth() + 1}.`;
+    const tipLbl = isMonth ? dt.toLocaleDateString('cs-CZ', { month: 'long', year: 'numeric' }) : lbl;
     const seg = e != null ? `<b style="height:${(e / c * 100).toFixed(1)}%"></b>` : '';
-    const tip = `${lbl} spotřeba ${fmt(c)} kWh` + (e != null ? `, z toho auto ${fmt(e)} kWh` : '');
+    const tip = `${tipLbl} spotřeba ${fmt(c)} kWh` + (e != null ? `, z toho auto ${fmt(e)} kWh` : '')
+      + (ssr != null ? `, soběstačnost ${Math.round(ssr)} %` : '');
+    const label = i % step !== 0 ? '&nbsp;'
+      : lbl + (isMonth ? `<small>${ssr == null ? '&nbsp;' : Math.round(ssr) + ' %'}</small>` : '');
     return `<div class="day"><div class="bars">` +
-      `<i class="prod" style="height:${h(p)}%" title="${lbl} výroba ${fmt(p)} kWh"></i>` +
+      `<i class="prod" style="height:${h(p)}%" title="${tipLbl} výroba ${fmt(p)} kWh"></i>` +
       `<i class="cons" style="height:${h(c)}%" title="${tip}">${seg}</i>` +
-      `</div><span class="dlabel">${i % step === 0 ? lbl : '&nbsp;'}</span></div>`;
+      `</div><span class="dlabel">${label}</span></div>`;
   }).join('');
   el.innerHTML =
     `<div class="daily-legend"><span><i style="background:var(--accent)"></i>Výroba</span>` +
@@ -577,19 +607,26 @@ function renderDaily(d) {
 function applyRange(range) {
   currentRange = range;
   const isDay = range === 'day';
-  const isAgg = range === 'week' || range === 'month';
+  const isAgg = isAggRange(range);
+  const isYear = range === 'year';
   document.getElementById('daynav').hidden = range === 'live';
-  // souhrn: Den hned, Týden/Měsíc ho ukážou až po načtení denních dat (loadDaily)
+  // souhrn: Den hned, Týden/Měsíc/Rok ho ukážou až po načtení dat (loadDaily)
   document.getElementById('balance').hidden = !isDay;
   document.getElementById('cardPower').hidden = isAgg;   // výkonový graf jen Živě/Den
-  document.getElementById('cardDaily').hidden = !isAgg;  // sloupce jen Týden/Měsíc
+  document.getElementById('cardDaily').hidden = !isAgg;  // sloupce jen Týden/Měsíc/Rok
+  // graf baterie za rok by měl desítky tisíc bodů; soběstačnost je u měsíců přímo
+  document.getElementById('cardSoc').hidden = isYear;
+  document.getElementById('dailyTitle').textContent = isYear
+    ? 'Měsíční přehled – výroba vs spotřeba (kWh)'
+    : 'Denní přehled – výroba vs spotřeba (kWh)';
   // při přepnutí režimu vždy začni výchozím pohledem (dnešek / klouzavé okno)
   if (isDay) currentDay = todayStr();
   if (range === 'week') weekStart = null;
   if (range === 'month') monthStr = null;
+  if (isYear) yearStr = null;
   if (range !== 'live') syncNav();
   if (isAgg) loadDaily(range);
-  loadSeries(range);   // graf baterie + soběstačnosti jede ve všech režimech
+  if (!isYear) loadSeries(range);   // graf baterie + soběstačnosti (kromě Roku)
 }
 
 document.querySelectorAll('.range button').forEach((b) => {

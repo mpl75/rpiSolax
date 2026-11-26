@@ -254,7 +254,9 @@ main { padding: 1.2rem; max-width: 1700px; margin: 0 auto; }
 /* podíl auta na spotřebě – fialový spodek modrého sloupce */
 .daily .bars > i.cons { position: relative; }
 .daily .bars > i.cons > b { position: absolute; left: 0; right: 0; bottom: 0; background: var(--purple); }
-.daily .dlabel { font-size: .68rem; color: var(--muted); margin-top: .35rem; white-space: nowrap; }
+.daily .dlabel { font-size: .68rem; color: var(--muted); margin-top: .35rem; white-space: nowrap; text-align: center; }
+/* Rok: soběstačnost měsíce pod jeho zkratkou */
+.daily .dlabel small { display: block; font-size: 1em; color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .chart-card {
   background: var(--card);

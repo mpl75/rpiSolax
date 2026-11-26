@@ -27,6 +27,12 @@ const FIELDS = [
     'selfSufficiencyRate', 'inverterMode', 'batteryMode',
 ];
 
+// Denní čítače střídače (kWh od půlnoci) – sčítají se do souhrnů Týden/Měsíc/Rok.
+const DAY_COUNTERS = [
+    'totalProduction', 'totalProductionInclBatt', 'totalConsumption',
+    'totalGridIn', 'totalGridOut', 'totalChargedIn', 'totalChargedOut',
+];
+
 // Sloupce CSV wallboxu (logs/evse/raw/) – musí sedět s EVSE_HEADER v evse.php.
 const EVSE_FIELDS = [
     'timestamp', 'power', 'powerL1', 'powerL2', 'powerL3', 'currentL1', 'currentL2',
@@ -428,13 +434,11 @@ function handleApi(array $q, string $logDir): array {
 
         // denní čítače střídače (kWh od půlnoci) – konečná hodnota dne; sloupce
         // kreslí výrobu a spotřebu, souhrnné dlaždice období sčítají všechny
-        $counters = ['totalProduction', 'totalProductionInclBatt', 'totalConsumption',
-                     'totalGridIn', 'totalGridOut', 'totalChargedIn', 'totalChargedOut'];
+        $counters = DAY_COUNTERS;
         $ts = $evse = [];
         $days = array_fill_keys($counters, []);
         for ($dd = $startD; $dd <= $endD; $dd = date('Y-m-d', strtotime($dd . ' +1 day'))) {
-            $rows = dayRows($logDir, $dd);
-            $last = $rows ? end($rows) : null;
+            $last = dayLastRow($logDir, $dd);
             $ts[] = strtotime($dd);
             foreach ($counters as $c) {
                 $days[$c][] = $last !== null && isset($last[$fi[$c]]) ? $last[$fi[$c]] + 0 : null;
@@ -446,7 +450,61 @@ function handleApi(array $q, string $logDir): array {
                 'evse' => $evse, 'count' => count($ts)];
     }
 
+    if ($api === 'monthly') {
+        // Měsíční souhrny pro pohled Rok: kalendářní rok (?year=YYYY) nebo bez
+        // kotvy posledních 12 měsíců včetně rozpracovaného. Součty denních čítačů
+        // a energie do auta; ze dne se čte jen poslední řádek, takže je to rychlé
+        // i za celý rok. Budoucí měsíce se vynechají.
+        $year  = (isset($q['year']) && preg_match('/^\d{4}$/', $q['year'])) ? $q['year'] : null;
+        $first = $year !== null ? "$year-01-01" : date('Y-m-01', strtotime(date('Y-m-01') . ' -11 months'));
+        $today = date('Y-m-d');
+        $fi    = array_flip(FIELDS);
+
+        $ts = $evse = [];
+        $months = array_fill_keys(DAY_COUNTERS, []);
+        for ($i = 0; $i < 12; $i++) {
+            $start = date('Y-m-01', strtotime("$first +$i months"));
+            if ($start > $today) break;
+            $end = min($today, date('Y-m-t', strtotime($start)));
+            $sum = array_fill_keys(DAY_COUNTERS, null);
+            $ev  = null;
+            for ($dd = $start; $dd <= $end; $dd = date('Y-m-d', strtotime($dd . ' +1 day'))) {
+                $last = dayLastRow($logDir, $dd);
+                if ($last !== null) {
+                    foreach (DAY_COUNTERS as $c) {
+                        if (isset($last[$fi[$c]])) $sum[$c] = ($sum[$c] ?? 0) + $last[$fi[$c]];
+                    }
+                }
+                $e = evseDayEnergy($logDir, $dd);
+                if ($e !== null) $ev = ($ev ?? 0) + $e;
+            }
+            $ts[] = strtotime($start);
+            foreach (DAY_COUNTERS as $c) {
+                $months[$c][] = $sum[$c] === null ? null : round($sum[$c], 2);
+            }
+            $evse[] = $ev === null ? null : round($ev, 1);
+        }
+        // stejný tvar jako 'daily' (sloupce + souhrnné dlaždice), jednotka = měsíc
+        return ['ok' => true, 'unit' => 'month', 'ts' => $ts,
+                'production' => $months['totalProduction'], 'consumption' => $months['totalConsumption'],
+                'days' => $months, 'evse' => $evse, 'count' => count($ts)];
+    }
+
     return ['ok' => false, 'error' => 'unknown api'];
+}
+
+/** Poslední řádek dne (konečné hodnoty denních čítačů) bez čtení celého souboru.
+ *  Pořadí jako dayRows(): agregát, syrový log, zazipovaný syrový log. */
+function dayLastRow(string $logDir, string $date): ?array {
+    foreach (["$logDir/agg/$date.csv", "$logDir/raw/$date.csv"] as $f) {
+        if (is_file($f)) return lastRow($f);
+    }
+    $gz = "$logDir/raw/$date.csv.gz";
+    if (is_file($gz)) {
+        $rows = readCsv($gz, true);
+        return $rows ? end($rows) : null;
+    }
+    return null;
 }
 
 function serveAsset(string $name): void {
@@ -561,6 +619,7 @@ function renderDashboard(): void {
       <button data-range="day">Den</button>
       <button data-range="week">Týden</button>
       <button data-range="month">Měsíc</button>
+      <button data-range="year">Rok</button>
     </div>
     <div class="daynav" id="daynav" hidden>
       <button id="dayPrev" type="button" aria-label="Předchozí období">‹</button>
@@ -570,7 +629,7 @@ function renderDashboard(): void {
     </div>
     <div class="balance" id="balance" hidden><!-- denní bilance doplní JS --></div>
     <div class="chart-card" id="cardPower"><h2>Výkon (W)</h2><div id="chartPower"></div></div>
-    <div class="chart-card" id="cardDaily" hidden><h2>Denní přehled – výroba vs spotřeba (kWh)</h2><div id="chartDaily"></div></div>
+    <div class="chart-card" id="cardDaily" hidden><h2 id="dailyTitle">Denní přehled – výroba vs spotřeba (kWh)</h2><div id="chartDaily"></div></div>
     <div class="chart-card" id="cardSoc"><h2>Baterie a soběstačnost (%)</h2><div id="chartSoc"></div></div>
   </section>
 </main>

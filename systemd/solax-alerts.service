@@ -1,0 +1,11 @@
+[Unit]
+Description=Solax FVE – kontrola provozu a upozornění přes ntfy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=www-data
+WorkingDirectory=/var/www/html/rpiSolax
+ExecStart=/usr/bin/php /var/www/html/rpiSolax/alerts.php
+# ntfy téma se čte z config.json (notify.ntfy), stav kontrol v logs/alerts-state.json

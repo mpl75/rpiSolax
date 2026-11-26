@@ -17,7 +17,9 @@ solax.conf.sample     # VZOR configu skriptu (v gitu); reálný solax.conf je gi
 solax.sh              # logger (5s smyčka, TUI + volitelně log do CSV)
 solax-aggregate.sh    # denní agregace raw 5s -> 10min
 evse.php              # logger wallboxu Solax HAC (Modbus TCP, 5s -> logs/evse/raw/)
-systemd/              # 4 unit soubory
+alerts.php            # kontrola provozu každých 5 min -> upozornění přes ntfy
+lib.php               # sdílené pomocné funkce PHP skriptů
+systemd/              # 6 unit souborů
 deploy/               # tento návod + Apache snippet
 .htaccess             # zákaz přímého přístupu k .json/.csv/.conf/.sh
 ```
@@ -82,6 +84,19 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now solax-evse.service
 journalctl -u solax-evse -n 20 --no-pager
 ls /var/www/html/rpiSolax/logs/evse/raw/   # dnešní .csv wallboxu
+```
+
+Upozornění do mobilu (ntfy). V `config.json` je `notify.ntfy` s náhodným
+tématem (název funguje jako heslo). V appce ntfy: **+** → Subscribe to topic →
+stejný název, server ntfy.sh. Zpráva přijde jen při změně stavu (problém
+začal / skončil); stav se drží v `logs/alerts-state.json`.
+```bash
+sudo cp /var/www/html/rpiSolax/systemd/solax-alerts.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now solax-alerts.timer
+cd /var/www/html/rpiSolax
+sudo -u www-data php alerts.php --dry    # stav kontrol, nic nepošle
+sudo -u www-data php alerts.php --test   # zkušební zpráva do appky
 ```
 
 ## 4. Apache

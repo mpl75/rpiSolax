@@ -12,6 +12,8 @@ Reads real-time data straight from the inverter's local API
 |------|--------------|
 | `solax.sh` | Live TUI monitor (~5 s refresh); optionally logs each sample to CSV (`log=1`). |
 | `evse.php` | Optional Solax X3-HAC wallbox logger (Modbus TCP, read-only) → `logs/evse/raw/`; feeds the dashboard's "Auto" tile. |
+| `alerts.php` | Health checks every 5 min (systemd timer) → push via ntfy on change: logger outage, inverter/wallbox fault, zero PV during the day. |
+| `lib.php` | Shared helpers (tail-reading CSV, `solax.conf` parser) for the PHP entry points. |
 | `solax-aggregate.sh` | Daily job: condenses raw ~5 s logs older than a day into ~10-min records and gzips the rest. |
 | `index.php` + `assets/` | Web dashboard: current values + history charts (uPlot), login-protected. |
 | `systemd/` | Units to run the logger and the daily aggregation on the Pi. |

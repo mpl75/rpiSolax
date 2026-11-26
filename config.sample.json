@@ -7,5 +7,12 @@
       "password": "$2y$10$REPLACE_WITH_BCRYPT_HASH",
       "admin": true
     }
-  ]
+  ],
+  "notify": {
+    "ntfy": {
+      "enabled": true,
+      "server": "https://ntfy.sh",
+      "topic": "REPLACE_WITH_RANDOM_TOPIC  (solax- + php -r 'echo bin2hex(random_bytes(12));')"
+    }
+  }
 }

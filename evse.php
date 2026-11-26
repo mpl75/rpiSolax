@@ -13,6 +13,8 @@ declare(strict_types=1);
 // Jen z příkazové řádky – přes web by nekonečná smyčka držela Apache proces
 if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
 
+require_once __DIR__ . '/lib.php';   // readShellConf
+
 // Pořadí sloupců – MUSÍ sedět s EVSE_FIELDS v index.php
 const EVSE_HEADER = 'timestamp,power,powerL1,powerL2,powerL3,currentL1,currentL2,currentL3,'
     . 'voltageL1,voltageL2,voltageL3,state,sessionEnergy,sessionStart,sessionDuration,'
@@ -134,17 +136,4 @@ function readExact($sock, int $n): string {
         $buf .= $chunk;
     }
     return $buf;
-}
-
-/** Načte klíč=hodnota ze solax.conf (bashová syntaxe, komentáře #). */
-function readShellConf(string $file): array {
-    $out = [];
-    if (!is_file($file)) return $out;
-    foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
-        $line = trim($line);
-        if ($line === '' || $line[0] === '#' || strpos($line, '=') === false) continue;
-        [$k, $v] = explode('=', $line, 2);
-        $out[trim($k)] = trim(trim($v), "\"'");
-    }
-    return $out;
 }
